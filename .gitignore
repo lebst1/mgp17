@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+downloads/
+bot.log
+messages.db
+.env
