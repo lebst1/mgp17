@@ -12,7 +12,6 @@ class BusinessRepository:
     async def save_connection(connection_id: str, user_telegram_id: int, is_enabled: bool = True) -> BusinessConnection:
         """Сохранить или обновить бизнес-подключение"""
         async with async_session() as session:
-            # Ищем существующее подключение
             result = await session.execute(
                 select(BusinessConnection).where(
                     BusinessConnection.connection_id == connection_id
@@ -21,14 +20,12 @@ class BusinessRepository:
             connection = result.scalar_one_or_none()
             
             if connection:
-                # Обновляем
                 connection.is_enabled = is_enabled
                 connection.last_activity = datetime.utcnow()
                 await session.commit()
                 await session.refresh(connection)
                 return connection
             
-            # Создаем новое
             connection = BusinessConnection(
                 connection_id=connection_id,
                 user_id=user_telegram_id,
