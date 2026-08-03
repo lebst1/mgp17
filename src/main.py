@@ -7,11 +7,8 @@ from aiogram.enums import ParseMode
 from src.config import settings
 from src.db.session import init_db
 from src.db.repositories.user_repository import UserRepository
-from src.bot.middlewares.auth import AuthMiddleware, AdminMiddleware
+from src.bot.middlewares.auth import AuthMiddleware
 from src.bot.handlers import start, savemode
-
-# Импорты для AI и dot команд (если они есть)
-# from src.bot.handlers import ai, dot_commands, admin
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,11 +28,6 @@ async def setup_dispatcher() -> Dispatcher:
     # Подключаем роутеры
     dp.include_router(start.router)
     dp.include_router(savemode.router)
-    
-    # Подключаем другие роутеры (раскомментировать когда появятся)
-    # dp.include_router(ai.router)
-    # dp.include_router(dot_commands.router)
-    # dp.include_router(admin.router)
     
     return dp
 

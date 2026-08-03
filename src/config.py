@@ -55,4 +55,5 @@ class Settings:
             self.BANNED_USERS = [int(x.strip()) for x in banned.split(",") if x.strip()]
 
 
+# ✅ ЭТО ВАЖНО! Создаем экземпляр настроек
 settings = Settings()

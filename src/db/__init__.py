@@ -1,3 +1,11 @@
-from src.db.session import get_session, init_db
+from src.db.session import async_session, init_db
+from src.db.models import User, SavedMessage, Todo, Reminder
 
-__all__ = ["get_session", "init_db"]
+__all__ = [
+    "async_session", 
+    "init_db",
+    "User",
+    "SavedMessage",
+    "Todo",
+    "Reminder"
+]
