@@ -3,7 +3,7 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from src.db.repositories.user_repository import UserRepository
 
-router = Router()
+router = Router()  # ✅ ЭТО ВАЖНО!
 
 
 @router.message(Command("start"))

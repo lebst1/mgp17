@@ -4,7 +4,7 @@ from aiogram.filters import Command
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.message_repository import MessageRepository
 
-router = Router()
+router = Router()  # ✅ ЭТО ВАЖНО!
 
 
 @router.message(Command("deleted"))
