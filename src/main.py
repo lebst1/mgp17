@@ -1,71 +1,81 @@
-from __future__ import annotations
-
 import asyncio
 import logging
-
-from aiogram import Bot
+from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-from src.bot.app import build_dispatcher
-from src.bot.commands_menu import setup_bot_commands
-from src.config import get_settings
-from src.db.repositories.settings import get_all_settings
+from src.config import settings
 from src.db.session import init_db
-from src.db.session import get_session
-from src.logging_config import setup_logging
-from src.services.agent import AgentRouter
-from src.services.llm.router import LLMRouter
-from src.services.reminders import ReminderScheduler
-from src.userbot.client import UserbotManager
+from src.db.repositories.user_repository import UserRepository
+from src.bot.middlewares.auth import AuthMiddleware, AdminMiddleware
+from src.bot.handlers import start, savemode
 
+# Импорты для AI и dot команд (если они есть)
+# from src.bot.handlers import ai, dot_commands, admin
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 
-async def main() -> None:
-    settings = get_settings()
-    settings.ensure_runtime_ready()
-    settings.ensure_dirs()
-    setup_logging()
-    await init_db(settings.database_url)
-    async with get_session() as session:
-        persisted_settings = await get_all_settings(session)
-    if persisted_settings.get("llm_provider"):
-        settings.llm_provider = persisted_settings["llm_provider"]
-    if persisted_settings.get("timezone"):
-        settings.timezone = persisted_settings["timezone"]
+async def setup_dispatcher() -> Dispatcher:
+    """Настройка диспетчера"""
+    dp = Dispatcher()
+    
+    # Подключаем middleware
+    dp.message.middleware(AuthMiddleware())
+    dp.callback_query.middleware(AuthMiddleware())
+    
+    # Подключаем роутеры
+    dp.include_router(start.router)
+    dp.include_router(savemode.router)
+    
+    # Подключаем другие роутеры (раскомментировать когда появятся)
+    # dp.include_router(ai.router)
+    # dp.include_router(dot_commands.router)
+    # dp.include_router(admin.router)
+    
+    return dp
 
-    bot = Bot(token=settings.bot_token_value, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    await setup_bot_commands(bot)
-    llm = LLMRouter(settings)
-    agent = AgentRouter(llm)
-    userbot = UserbotManager(settings=settings, bot=bot, llm=llm)
-    if settings.telegram_mode in {"userbot", "both"}:
-        await userbot.restore()
 
-    reminder_scheduler = ReminderScheduler(bot, settings, llm)
-    reminder_scheduler.start()
-    dp = build_dispatcher(settings, userbot, llm, agent)
-
-    logger.info("Mnemora started")
-    try:
-        await dp.start_polling(
-            bot,
-            allowed_updates=[
-                "business_connection",
-                "business_message",
-                "edited_business_message",
-                "deleted_business_messages",
-                "message",
-                "callback_query",
-            ],
-        )
-    finally:
-        await reminder_scheduler.shutdown()
-        await userbot.shutdown()
-        await bot.session.close()
+async def main():
+    """Главная функция запуска"""
+    logger.info("🚀 Запуск Mnemora...")
+    
+    # Инициализация БД
+    await init_db()
+    logger.info("✅ База данных инициализирована")
+    
+    # Создаем владельца в БД
+    if settings.OWNER_TELEGRAM_ID:
+        owner = await UserRepository.get_or_create(settings.OWNER_TELEGRAM_ID)
+        if owner:
+            await UserRepository.update_settings(
+                settings.OWNER_TELEGRAM_ID,
+                is_admin=True
+            )
+            logger.info(f"👤 Владелец бота: {settings.OWNER_TELEGRAM_ID}")
+    
+    # Настраиваем бота
+    bot = Bot(
+        token=settings.BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    )
+    
+    # Настраиваем диспетчер
+    dp = await setup_dispatcher()
+    
+    # Запускаем поллинг
+    logger.info("✅ Бот запущен и готов к работе!")
+    await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("🛑 Бот остановлен")
+    except Exception as e:
+        logger.error(f"❌ Ошибка: {e}")
