@@ -113,6 +113,7 @@ async def handle_business_message(message: Message):
         logger.error(f"❌ Ошибка сохранения сообщения: {e}")
 
 
+# ✅ ИСПРАВЛЕНО: используем правильный декоратор для удаленных сообщений
 @router.business_messages_deleted()
 async def handle_business_deleted(event: BusinessMessagesDeleted):
     """Обработчик удаленных бизнес-сообщений — ДЛЯ ЛЮБОГО ПОЛЬЗОВАТЕЛЯ"""
@@ -221,7 +222,6 @@ async def business_status(message: Message):
         status_text += f"\n<b>Активные подключения:</b>\n"
         for conn in connections:
             status_text += f"• {conn.connection_id[:20]}... {'✅ активен' if conn.is_enabled else '❌ отключен'}\n"
-            # ✅ ИСПРАВЛЕНО: проверка на None перед форматированием
             if conn.connected_at:
                 status_text += f"  Подключен: {conn.connected_at.strftime('%d.%m.%Y %H:%M')}\n"
             else:
