@@ -1,13 +1,13 @@
 import logging
 import json
 from aiogram import Router, F
-from aiogram.types import Message, BusinessConnection, BusinessMessagesDeleted
+from aiogram.types import Message, BusinessConnection, BusinessMessagesDeleted, CallbackQuery
 from aiogram.filters import Command
 from datetime import datetime
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.message_repository import MessageRepository
 from src.db.repositories.business_repository import BusinessRepository
-from src.db.session import async_session  # ✅ ИМПОРТ ДОБАВЛЕН
+from src.db.session import async_session
 from src.config import settings
 
 logger = logging.getLogger(__name__)
@@ -15,44 +15,10 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-@router.business_connection()
-async def handle_business_connection(event: BusinessConnection):
-    """Обработчик подключения бизнес-аккаунта — ДЛЯ ЛЮБОГО ПОЛЬЗОВАТЕЛЯ"""
-    user_id = event.user.id
-    connection_id = event.connection_id
-    
-    logger.info(f"🔗 Business подключение: {connection_id}")
-    logger.info(f"👤 Пользователь: {user_id}")
-    logger.info(f"📊 Статус: {event.is_enabled}")
-    
-    # Создаем или обновляем пользователя
-    user = await UserRepository.get_or_create(
-        telegram_id=user_id,
-        username=event.user.username,
-        first_name=event.user.first_name,
-        last_name=event.user.last_name
-    )
-    
-    # Сохраняем подключение
-    connection = await BusinessRepository.save_connection(
-        connection_id=connection_id,
-        user_telegram_id=user_id,
-        is_enabled=event.is_enabled
-    )
-    
-    # Отправляем приветствие владельцу
-    await event.answer(
-        "✅ Ваш бизнес-аккаунт подключен к Mnemora!\n\n"
-        "Теперь я буду сохранять удаленные и отредактированные сообщения.\n"
-        "Чтобы проверить статус, отправьте /business_status"
-    )
-    
-    logger.info(f"✅ Пользователь {user_id} подключил бизнес-аккаунт")
-
-
-@router.business_message()
+# ✅ ОБРАБОТЧИК НОВЫХ СООБЩЕНИЙ
+@router.message(F.business_connection_id.is_not(None))
 async def handle_business_message(message: Message):
-    """Обработчик новых бизнес-сообщений — ДЛЯ ЛЮБОГО ПОЛЬЗОВАТЕЛЯ"""
+    """Обработчик новых бизнес-сообщений"""
     if not message.from_user:
         return
     
@@ -113,10 +79,11 @@ async def handle_business_message(message: Message):
         logger.error(f"❌ Ошибка сохранения сообщения: {e}")
 
 
-@router.business_messages_deleted()
-async def handle_business_deleted(event: BusinessMessagesDeleted):
-    """Обработчик удаленных бизнес-сообщений — ДЛЯ ЛЮБОГО ПОЛЬЗОВАТЕЛЯ"""
-    connection_id = event.business_connection_id
+# ✅ ОБРАБОТЧИК УДАЛЕННЫХ СООБЩЕНИЙ
+@router.message(F.business_connection_id.is_not(None))
+async def handle_business_deleted(message: Message):
+    """Обработчик удаленных бизнес-сообщений"""
+    connection_id = message.business_connection_id
     if not connection_id:
         return
     
@@ -126,26 +93,29 @@ async def handle_business_deleted(event: BusinessMessagesDeleted):
         logger.warning(f"⚠️ Неизвестный connection_id: {connection_id}")
         return
     
-    logger.info(f"🗑 Удалены сообщения: {event.message_ids} в чате {event.chat.id} от {user.telegram_id}")
+    # Проверяем, что сообщение было удалено (есть поле is_deleted или deleted)
+    if not hasattr(message, 'is_deleted') or not message.is_deleted:
+        return
     
-    # Для каждого удаленного сообщения
-    for message_id in event.message_ids:
-        try:
-            # Помечаем сообщение как удаленное в БД
-            await MessageRepository.mark_as_deleted(
-                message_id=message_id,
-                chat_id=event.chat.id,
-                user_id=user.telegram_id
-            )
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка обработки удаления: {e}")
+    logger.info(f"🗑 Удалено сообщение {message.message_id} в чате {message.chat.id} от {user.telegram_id}")
+    
+    try:
+        # Помечаем сообщение как удаленное в БД
+        await MessageRepository.mark_as_deleted(
+            message_id=message.message_id,
+            chat_id=message.chat.id,
+            user_id=user.telegram_id
+        )
+    except Exception as e:
+        logger.error(f"❌ Ошибка обработки удаления: {e}")
 
 
-@router.business_message(edited=True)
+# ✅ ОБРАБОТЧИК ОТРЕДАКТИРОВАННЫХ СООБЩЕНИЙ
+@router.message(F.business_connection_id.is_not(None))
 async def handle_business_edited(message: Message):
-    """Обработчик отредактированных бизнес-сообщений — ДЛЯ ЛЮБОГО ПОЛЬЗОВАТЕЛЯ"""
-    if not message.from_user:
+    """Обработчик отредактированных бизнес-сообщений"""
+    # Проверяем, что сообщение было отредактировано
+    if not message.edit_date:
         return
     
     connection_id = message.business_connection_id
@@ -180,7 +150,7 @@ async def handle_business_edited(message: Message):
             async with async_session() as session:
                 saved_msg.text = message.text
                 saved_msg.is_edited = True
-                saved_msg.edit_history = json.dumps(history[-10:])  # Храним последние 10 правок
+                saved_msg.edit_history = json.dumps(history[-10:])
                 await session.commit()
                 
             logger.info(f"✅ Обновлена история правок для сообщения {message.message_id}")
@@ -191,7 +161,7 @@ async def handle_business_edited(message: Message):
 
 @router.message(Command("business_status"))
 async def business_status(message: Message):
-    """Проверить статус бизнес-подключения — ДЛЯ ЛЮБОГО ПОЛЬЗОВАТЕЛЯ"""
+    """Проверить статус бизнес-подключения"""
     user = await UserRepository.get_by_id(message.from_user.id)
     
     # Получаем подключения пользователя

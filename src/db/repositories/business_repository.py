@@ -1,5 +1,5 @@
 from sqlalchemy import select
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from src.db.models import BusinessConnection, User
 from src.db.session import async_session
@@ -76,7 +76,7 @@ class BusinessRepository:
                 await session.commit()
     
     @staticmethod
-    async def get_user_connections(user_telegram_id: int) -> list:
+    async def get_user_connections(user_telegram_id: int) -> List[BusinessConnection]:
         """Получить все подключения пользователя"""
         async with async_session() as session:
             result = await session.execute(
