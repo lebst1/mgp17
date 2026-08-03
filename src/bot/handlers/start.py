@@ -2,14 +2,19 @@ from aiogram import Router
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from src.db.repositories.user_repository import UserRepository
+from src.db.repositories.business_repository import BusinessRepository
 
-router = Router()  # ✅ ЭТО ВАЖНО!
+router = Router()
 
 
 @router.message(Command("start"))
 async def start_command(message: Message):
     """Обработчик команды /start"""
     user = await UserRepository.get_by_id(message.from_user.id)
+    
+    # ✅ Получаем количество подключений отдельным запросом
+    connections = await BusinessRepository.get_user_connections(message.from_user.id)
+    has_business = len(connections) > 0
     
     welcome_text = f"""
 🌟 <b>Добро пожаловать в Mnemora!</b>
@@ -35,7 +40,7 @@ async def start_command(message: Message):
 <b>Ваш статус:</b>
 ✅ Аккаунт активен
 ✅ SAVE MODE: {'включен' if user.savemode_enabled else 'выключен'}
-✅ Business подключение: {'активно' if user.business_connections else 'не подключено'}
+✅ Business подключение: {'активно' if has_business else 'не подключено'}
 """
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
