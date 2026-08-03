@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from aiogram import Bot, Dispatcher  # ✅ Добавлен Dispatcher
+from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
@@ -8,7 +8,8 @@ from src.config import settings
 from src.db.session import init_db
 from src.db.repositories.user_repository import UserRepository
 from src.bot.middlewares.auth import AuthMiddleware
-from src.bot.handlers import start_router, savemode_router
+from src.bot.handlers import start, savemode
+from src.business_bot.handlers import router as business_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,8 +27,9 @@ async def setup_dispatcher() -> Dispatcher:
     dp.callback_query.middleware(AuthMiddleware())
     
     # Подключаем роутеры
-    dp.include_router(start_router)
-    dp.include_router(savemode_router)
+    dp.include_router(start.router)
+    dp.include_router(savemode.router)
+    dp.include_router(business_router)  # Бизнес-обработчики для ВСЕХ
     
     return dp
 
@@ -35,12 +37,13 @@ async def setup_dispatcher() -> Dispatcher:
 async def main():
     """Главная функция запуска"""
     logger.info("🚀 Запуск Mnemora...")
+    logger.info(f"📌 Режим: {settings.TELEGRAM_MODE}")
     
     # Инициализация БД
     await init_db()
     logger.info("✅ База данных инициализирована")
     
-    # Создаем владельца в БД
+    # Создаем владельца в БД (если есть)
     if settings.OWNER_TELEGRAM_ID:
         owner = await UserRepository.get_or_create(settings.OWNER_TELEGRAM_ID)
         if owner:
@@ -61,6 +64,7 @@ async def main():
     
     # Запускаем поллинг
     logger.info("✅ Бот запущен и готов к работе!")
+    logger.info("📌 Ожидание бизнес-событий от ЛЮБЫХ пользователей...")
     await dp.start_polling(bot)
 
 

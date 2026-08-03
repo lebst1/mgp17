@@ -35,6 +35,7 @@ async def start_command(message: Message):
 <b>Ваш статус:</b>
 ✅ Аккаунт активен
 ✅ SAVE MODE: {'включен' if user.savemode_enabled else 'выключен'}
+✅ Business подключение: {'активно' if user.business_connections else 'не подключено'}
 """
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -78,5 +79,6 @@ async def help_command(message: Message):
 <b>👤 Профиль:</b>
 /profile - ваш профиль
 /settings - настройки
+/business_status - статус бизнес-подключения
 """
     await message.answer(help_text, parse_mode="HTML")

@@ -38,9 +38,31 @@ class User(Base):
     saved_messages = relationship("SavedMessage", back_populates="user")
     todos = relationship("Todo", back_populates="user")
     reminders = relationship("Reminder", back_populates="user")
+    business_connections = relationship("BusinessConnection", back_populates="user")
     
     def __repr__(self):
         return f"<User {self.telegram_id} ({self.username or self.first_name})>"
+
+
+class BusinessConnection(Base):
+    """Модель бизнес-подключения"""
+    __tablename__ = "business_connections"
+    
+    id = Column(Integer, primary_key=True)
+    connection_id = Column(String(255), unique=True, nullable=False, index=True)
+    user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False, index=True)
+    
+    is_enabled = Column(Boolean, default=True)
+    can_reply = Column(Boolean, default=False)
+    
+    connected_at = Column(DateTime, default=datetime.utcnow)
+    last_activity = Column(DateTime, default=datetime.utcnow)
+    
+    # Связи
+    user = relationship("User", back_populates="business_connections")
+    
+    def __repr__(self):
+        return f"<BusinessConnection {self.connection_id} for user {self.user_id}>"
 
 
 class SavedMessage(Base):
@@ -49,6 +71,7 @@ class SavedMessage(Base):
     
     id = Column(Integer, primary_key=True)
     user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False, index=True)
+    connection_id = Column(String(255), nullable=True, index=True)
     
     # Информация о сообщении
     chat_id = Column(BigInteger, nullable=False, index=True)
@@ -112,3 +135,4 @@ class Reminder(Base):
 User.saved_messages = relationship("SavedMessage", back_populates="user")
 User.todos = relationship("Todo", back_populates="user")
 User.reminders = relationship("Reminder", back_populates="user")
+User.business_connections = relationship("BusinessConnection", back_populates="user")
