@@ -1,8 +1,7 @@
-from aiogram import Router, F
+from aiogram import Router
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from src.db.repositories.user_repository import UserRepository
-from src.config import settings
 
 router = Router()
 
