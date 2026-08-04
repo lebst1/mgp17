@@ -55,7 +55,8 @@ class BusinessConnection(Base):
     is_enabled = Column(Boolean, default=True)
     can_reply = Column(Boolean, default=False)
     
-    connected_at = Column(DateTime, default=datetime.utcnow)
+    # ✅ ИСПРАВЛЕНО: Поле называется created_at, а не connected_at
+    created_at = Column(DateTime, default=datetime.utcnow)
     last_activity = Column(DateTime, default=datetime.utcnow)
     
     # Связи

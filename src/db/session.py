@@ -42,16 +42,16 @@ async def init_db():
         # Выполняем миграции через синхронную функцию
         def run_migrations(sync_conn):
             """Синхронная функция для миграций"""
-            inspector = inspect(sync_conn)  # ✅ Правильно!
+            inspector = inspect(sync_conn)
             
             # Проверяем таблицу business_connections
             if "business_connections" in inspector.get_table_names():
                 columns = [col["name"] for col in inspector.get_columns("business_connections")]
                 
-                # Добавляем колонки если их нет
-                if "connected_at" not in columns:
-                    sync_conn.execute(text("ALTER TABLE business_connections ADD COLUMN connected_at DATETIME"))
-                    logger.info("✅ Добавлена колонка connected_at")
+                # ✅ ИСПРАВЛЕНО: Проверяем правильные имена колонок
+                if "created_at" not in columns:
+                    sync_conn.execute(text("ALTER TABLE business_connections ADD COLUMN created_at DATETIME"))
+                    logger.info("✅ Добавлена колонка created_at")
                 
                 if "last_activity" not in columns:
                     sync_conn.execute(text("ALTER TABLE business_connections ADD COLUMN last_activity DATETIME"))

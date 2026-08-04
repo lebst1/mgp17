@@ -12,6 +12,7 @@ class BusinessRepository:
     async def save_connection(connection_id: str, user_telegram_id: int, is_enabled: bool = True) -> BusinessConnection:
         """Сохранить или обновить бизнес-подключение"""
         async with async_session() as session:
+            # Ищем существующее подключение
             result = await session.execute(
                 select(BusinessConnection).where(
                     BusinessConnection.connection_id == connection_id
@@ -20,16 +21,20 @@ class BusinessRepository:
             connection = result.scalar_one_or_none()
             
             if connection:
+                # Обновляем
                 connection.is_enabled = is_enabled
                 connection.last_activity = datetime.utcnow()
                 await session.commit()
                 await session.refresh(connection)
                 return connection
             
+            # ✅ ИСПРАВЛЕНО: Используем правильные имена полей
             connection = BusinessConnection(
                 connection_id=connection_id,
                 user_id=user_telegram_id,
-                is_enabled=is_enabled
+                is_enabled=is_enabled,
+                created_at=datetime.utcnow(),  # ✅ created_at, а не connected_at
+                last_activity=datetime.utcnow()
             )
             session.add(connection)
             await session.commit()
