@@ -1,6 +1,6 @@
 import logging
 import json
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.types import Message, BusinessConnection, BusinessMessagesDeleted
 from aiogram.filters import Command
 from datetime import datetime
@@ -17,13 +17,16 @@ router = Router()
 
 # ✅ ПОДКЛЮЧЕНИЕ БИЗНЕС-АККАУНТА — ИСПРАВЛЕНО!
 @router.business_connection()
-async def handle_business_connection(event: BusinessConnection):
+async def handle_business_connection(event: BusinessConnection, bot: Bot):
+    """Обработчик подключения бизнес-аккаунта"""
     user_id = event.user.id
-    connection_id = event.id  # ✅ Вместо event.connection_id используем event.id
+    connection_id = event.id
     
     logger.info(f"🔗 Business подключение: {connection_id}")
     logger.info(f"👤 Пользователь: {user_id}")
+    logger.info(f"📊 Статус: {event.is_enabled}")
     
+    # Создаем или обновляем пользователя
     user = await UserRepository.get_or_create(
         telegram_id=user_id,
         username=event.user.username,
@@ -31,17 +34,24 @@ async def handle_business_connection(event: BusinessConnection):
         last_name=event.user.last_name
     )
     
-    await BusinessRepository.save_connection(
+    # Сохраняем подключение
+    connection = await BusinessRepository.save_connection(
         connection_id=connection_id,
         user_telegram_id=user_id,
         is_enabled=event.is_enabled
     )
     
-    await event.answer(
-        "✅ Ваш бизнес-аккаунт подключен к Mnemora!\n\n"
-        "Теперь я буду сохранять удаленные и отредактированные сообщения.\n"
-        "Чтобы проверить статус, отправьте /business_status"
-    )
+    # ✅ ИСПРАВЛЕНО: Отправляем сообщение через bot, а не event.answer()
+    try:
+        await bot.send_message(
+            chat_id=user_id,
+            text="✅ Ваш бизнес-аккаунт подключен к Mnemora!\n\n"
+                 "Теперь я буду сохранять удаленные и отредактированные сообщения.\n"
+                 "Чтобы проверить статус, отправьте /business_status"
+        )
+        logger.info(f"✅ Отправлено приветствие пользователю {user_id}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка отправки приветствия: {e}")
     
     logger.info(f"✅ Пользователь {user_id} подключил бизнес-аккаунт")
 
@@ -49,6 +59,7 @@ async def handle_business_connection(event: BusinessConnection):
 # ✅ НОВЫЕ СООБЩЕНИЯ (НЕ ОТРЕДАКТИРОВАННЫЕ)
 @router.business_message()
 async def handle_business_message(message: Message):
+    """Обработчик новых бизнес-сообщений"""
     # Проверяем, что это НЕ отредактированное сообщение
     if message.edit_date is not None:
         return
@@ -181,6 +192,7 @@ async def handle_business_edited(message: Message):
 # ✅ КОМАНДА /business_status
 @router.message(Command("business_status"))
 async def business_status(message: Message):
+    """Проверить статус бизнес-подключения"""
     user = await UserRepository.get_by_id(message.from_user.id)
     connections = await BusinessRepository.get_user_connections(message.from_user.id)
     
@@ -204,8 +216,8 @@ async def business_status(message: Message):
         status_text += "\n<b>Активные подключения:</b>\n"
         for conn in connections:
             status_text += f"• {conn.connection_id[:20]}... {'✅ активен' if conn.is_enabled else '❌ отключен'}\n"
-            if conn.connected_at:
-                status_text += f"  Подключен: {conn.connected_at.strftime('%d.%m.%Y %H:%M')}\n"
+            if conn.created_at:
+                status_text += f"  Подключен: {conn.created_at.strftime('%d.%m.%Y %H:%M')}\n"
             else:
                 status_text += "  Подключен: Неизвестно\n"
     
@@ -215,6 +227,7 @@ async def business_status(message: Message):
 # ✅ КОМАНДА /savemode
 @router.message(Command("savemode"))
 async def toggle_savemode(message: Message):
+    """Включить/выключить SAVE MODE для пользователя"""
     args = message.text.split()
     
     if len(args) < 2:
