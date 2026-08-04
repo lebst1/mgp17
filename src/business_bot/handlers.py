@@ -46,9 +46,13 @@ async def handle_business_connection(event: BusinessConnection):
     logger.info(f"✅ Пользователь {user_id} подключил бизнес-аккаунт")
 
 
-# ✅ НОВЫЕ СООБЩЕНИЯ
+# ✅ НОВЫЕ СООБЩЕНИЯ (НЕ ОТРЕДАКТИРОВАННЫЕ)
 @router.business_message()
 async def handle_business_message(message: Message):
+    # Проверяем, что это НЕ отредактированное сообщение
+    if message.edit_date is not None:
+        return
+    
     if not message.from_user:
         return
     
@@ -105,7 +109,7 @@ async def handle_business_message(message: Message):
         logger.error(f"❌ Ошибка сохранения сообщения: {e}")
 
 
-# ✅ УДАЛЕННЫЕ СООБЩЕНИЯ — ПРАВИЛЬНЫЙ ОБРАБОТЧИК!
+# ✅ УДАЛЕННЫЕ СООБЩЕНИЯ
 @router.business_message()
 async def handle_business_deleted(event: BusinessMessagesDeleted):
     """Обработчик удаленных сообщений (BusinessMessagesDeleted)"""
@@ -131,9 +135,10 @@ async def handle_business_deleted(event: BusinessMessagesDeleted):
             logger.error(f"❌ Ошибка обработки удаления: {e}")
 
 
-# ✅ ОТРЕДАКТИРОВАННЫЕ СООБЩЕНИЯ
-@router.business_message(edited=True)
+# ✅ ОТРЕДАКТИРОВАННЫЕ СООБЩЕНИЯ (через магический фильтр F)
+@router.business_message(F.edit_date.is_not(None))
 async def handle_business_edited(message: Message):
+    """Обработчик отредактированных бизнес-сообщений (используем F.edit_date)"""
     if not message.from_user:
         return
     
