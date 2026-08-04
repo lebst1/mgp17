@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-# ✅ ПОДКЛЮЧЕНИЕ БИЗНЕС-АККАУНТА — ИСПРАВЛЕНО!
+# ✅ ПОДКЛЮЧЕНИЕ БИЗНЕС-АККАУНТА
 @router.business_connection()
 async def handle_business_connection(event: BusinessConnection, bot: Bot):
     """Обработчик подключения бизнес-аккаунта"""
@@ -41,7 +41,7 @@ async def handle_business_connection(event: BusinessConnection, bot: Bot):
         is_enabled=event.is_enabled
     )
     
-    # ✅ ИСПРАВЛЕНО: Отправляем сообщение через bot, а не event.answer()
+    # Отправляем приветствие через бота
     try:
         await bot.send_message(
             chat_id=user_id,
@@ -56,7 +56,7 @@ async def handle_business_connection(event: BusinessConnection, bot: Bot):
     logger.info(f"✅ Пользователь {user_id} подключил бизнес-аккаунт")
 
 
-# ✅ НОВЫЕ СООБЩЕНИЯ (НЕ ОТРЕДАКТИРОВАННЫЕ)
+# ✅ НОВЫЕ СООБЩЕНИЯ
 @router.business_message()
 async def handle_business_message(message: Message):
     """Обработчик новых бизнес-сообщений"""
@@ -70,6 +70,9 @@ async def handle_business_message(message: Message):
     connection_id = message.business_connection_id
     if not connection_id:
         return
+    
+    # Логируем connection_id для отладки
+    logger.info(f"📩 Новое сообщение с connection_id: {connection_id}")
     
     user = await BusinessRepository.get_user_by_connection(connection_id)
     if not user:
@@ -120,17 +123,36 @@ async def handle_business_message(message: Message):
         logger.error(f"❌ Ошибка сохранения сообщения: {e}")
 
 
-# ✅ УДАЛЕННЫЕ СООБЩЕНИЯ
-@router.business_message()
+# ✅ УДАЛЕННЫЕ СООБЩЕНИЯ — ИСПРАВЛЕННАЯ ВЕРСИЯ!
+@router.business_messages_deleted()
 async def handle_business_deleted(event: BusinessMessagesDeleted):
-    """Обработчик удаленных сообщений (BusinessMessagesDeleted)"""
+    """Обработчик удаленных бизнес-сообщений"""
     connection_id = event.business_connection_id
     if not connection_id:
+        logger.warning("⚠️ Нет connection_id в событии удаления")
         return
     
+    logger.info(f"🔍 Получено удаление с connection_id: {connection_id}")
+    
+    # Получаем пользователя по connection_id
     user = await BusinessRepository.get_user_by_connection(connection_id)
     if not user:
         logger.warning(f"⚠️ Неизвестный connection_id: {connection_id}")
+        # Пробуем найти connection_id в БД
+        connection = await BusinessRepository.get_connection(connection_id)
+        if not connection:
+            logger.info(f"💾 connection_id {connection_id} не найден в БД")
+            # Временно пропускаем, так как не знаем user_id
+            return
+        # Если connection есть, но user не найден — пробуем получить user_id из connection
+        if connection:
+            user = await UserRepository.get_by_id(connection.user_id)
+            if not user:
+                logger.warning(f"⚠️ Пользователь {connection.user_id} не найден")
+                return
+    
+    if not user:
+        logger.warning("⚠️ Пользователь не найден, пропускаем")
         return
     
     logger.info(f"🗑 Удалены сообщения: {event.message_ids} в чате {event.chat.id} от {user.telegram_id}")
@@ -142,11 +164,12 @@ async def handle_business_deleted(event: BusinessMessagesDeleted):
                 chat_id=event.chat.id,
                 user_id=user.telegram_id
             )
+            logger.info(f"✅ Сообщение {message_id} отмечено как удаленное")
         except Exception as e:
-            logger.error(f"❌ Ошибка обработки удаления: {e}")
+            logger.error(f"❌ Ошибка обработки удаления для сообщения {message_id}: {e}")
 
 
-# ✅ ОТРЕДАКТИРОВАННЫЕ СООБЩЕНИЯ (через магический фильтр F)
+# ✅ ОТРЕДАКТИРОВАННЫЕ СООБЩЕНИЯ
 @router.business_message(F.edit_date.is_not(None))
 async def handle_business_edited(message: Message):
     """Обработчик отредактированных бизнес-сообщений"""
