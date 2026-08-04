@@ -12,7 +12,6 @@ async def start_command(message: Message):
     """Обработчик команды /start"""
     user = await UserRepository.get_by_id(message.from_user.id)
     
-    # ✅ ПРАВИЛЬНО: получаем количество подключений через репозиторий
     connections = await BusinessRepository.get_user_connections(message.from_user.id)
     has_business = len(connections) > 0
     

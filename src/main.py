@@ -8,7 +8,7 @@ from src.config import settings
 from src.db.session import init_db
 from src.db.repositories.user_repository import UserRepository
 from src.bot.middlewares.auth import AuthMiddleware
-from src.bot.handlers import start_router, savemode_router  # ✅ ИЗМЕНЕНО
+from src.bot.handlers import start_router, savemode_router
 from src.business_bot.handlers import router as business_router
 
 logging.basicConfig(
@@ -27,9 +27,9 @@ async def setup_dispatcher() -> Dispatcher:
     dp.callback_query.middleware(AuthMiddleware())
     
     # Подключаем роутеры
-    dp.include_router(start_router)       # ✅ ИЗМЕНЕНО
-    dp.include_router(savemode_router)    # ✅ ИЗМЕНЕНО
-    dp.include_router(business_router)
+    dp.include_router(start_router)
+    dp.include_router(savemode_router)
+    dp.include_router(business_router)  # Бизнес-обработчики
     
     return dp
 

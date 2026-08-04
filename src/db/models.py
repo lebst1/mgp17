@@ -14,27 +14,23 @@ class User(Base):
     first_name = Column(String(255), nullable=True)
     last_name = Column(String(255), nullable=True)
     
-    # Права доступа
     is_active = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False)
     can_use_savemode = Column(Boolean, default=True)
     can_use_ai = Column(Boolean, default=True)
     can_use_dot_commands = Column(Boolean, default=True)
     
-    # Настройки пользователя
     savemode_enabled = Column(Boolean, default=True)
     autoreply_enabled = Column(Boolean, default=False)
     digest_enabled = Column(Boolean, default=False)
     digest_time = Column(String(10), default="09:00")
     
-    # Статистика
     messages_saved = Column(Integer, default=0)
     ai_requests = Column(Integer, default=0)
     
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # Связи
     saved_messages = relationship("SavedMessage", back_populates="user")
     todos = relationship("Todo", back_populates="user")
     reminders = relationship("Reminder", back_populates="user")
@@ -55,12 +51,10 @@ class BusinessConnection(Base):
     is_enabled = Column(Boolean, default=True)
     can_reply = Column(Boolean, default=False)
     
-    # ✅ ИСПРАВЛЕНО: Добавлено поле updated_at
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_activity = Column(DateTime, default=datetime.utcnow)
     
-    # Связи
     user = relationship("User", back_populates="business_connections")
     
     def __repr__(self):
@@ -75,7 +69,6 @@ class SavedMessage(Base):
     user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False, index=True)
     connection_id = Column(String(255), nullable=True, index=True)
     
-    # Информация о сообщении
     chat_id = Column(BigInteger, nullable=False, index=True)
     chat_title = Column(String(255), nullable=True)
     message_id = Column(Integer, nullable=False)
@@ -83,14 +76,12 @@ class SavedMessage(Base):
     from_username = Column(String(255), nullable=True)
     from_first_name = Column(String(255), nullable=True)
     
-    # Содержимое
     text = Column(Text, nullable=True)
     media_type = Column(String(50), nullable=True)
     media_file_id = Column(String(255), nullable=True)
     media_path = Column(String(500), nullable=True)
     media_size = Column(Integer, nullable=True)
     
-    # Метаданные
     is_deleted = Column(Boolean, default=False)
     is_edited = Column(Boolean, default=False)
     edit_history = Column(Text, nullable=True)
@@ -98,7 +89,6 @@ class SavedMessage(Base):
     saved_at = Column(DateTime, default=datetime.utcnow)
     original_date = Column(DateTime, nullable=True)
     
-    # Связи
     user = relationship("User", back_populates="saved_messages")
     
     def __repr__(self):
@@ -106,7 +96,6 @@ class SavedMessage(Base):
 
 
 class Todo(Base):
-    """Задача пользователя"""
     __tablename__ = "todos"
     
     id = Column(Integer, primary_key=True)
@@ -120,7 +109,6 @@ class Todo(Base):
 
 
 class Reminder(Base):
-    """Напоминание пользователя"""
     __tablename__ = "reminders"
     
     id = Column(Integer, primary_key=True)

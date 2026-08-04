@@ -1,12 +1,13 @@
 from src.db.session import async_session, init_db, get_session
-from src.db.models import User, SavedMessage, Todo, Reminder
+from src.db.models import User, SavedMessage, Todo, Reminder, BusinessConnection
 
 __all__ = [
     "async_session", 
     "init_db",
-    "get_session",  # ✅ Добавляем в экспорт
+    "get_session",
     "User",
     "SavedMessage",
     "Todo",
-    "Reminder"
+    "Reminder",
+    "BusinessConnection"
 ]

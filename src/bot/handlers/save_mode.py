@@ -4,7 +4,7 @@ from aiogram.filters import Command
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.message_repository import MessageRepository
 
-router = Router()  # ✅ ЭТО ВАЖНО!
+router = Router()
 
 
 @router.message(Command("deleted"))
@@ -60,3 +60,47 @@ async def search_messages(message: Message):
         text += f"   🕐 {msg.saved_at.strftime('%d.%m.%Y %H:%M')}\n\n"
     
     await message.answer(text, parse_mode="HTML")
+
+
+@router.message(Command("edits"))
+async def show_edits(message: Message):
+    """Показать последние отредактированные сообщения"""
+    await message.answer("✏️ Функция в разработке")
+
+
+@router.message(Command("media"))
+async def show_media(message: Message):
+    """Показать последние сохраненные медиа"""
+    await message.answer("🖼️ Функция в разработке")
+
+
+@router.message(Command("savemode_settings"))
+async def savemode_settings(message: Message):
+    """Настройки SAVE MODE"""
+    await message.answer("⚙️ Настройки SAVE MODE\n\n/savemode on - включить\n/savemode off - выключить")
+
+
+@router.message(Command("savemode"))
+async def toggle_savemode(message: Message):
+    """Включить/выключить SAVE MODE"""
+    args = message.text.split()
+    
+    if len(args) < 2:
+        await message.answer("ℹ️ Использование: /savemode on - включить, /savemode off - выключить")
+        return
+    
+    action = args[1].lower()
+    
+    if action not in ["on", "off"]:
+        await message.answer("❌ Используйте 'on' или 'off'")
+        return
+    
+    enabled = action == "on"
+    user = await UserRepository.update_settings(message.from_user.id, savemode_enabled=enabled)
+    
+    if not user:
+        await message.answer("❌ Ошибка: пользователь не найден")
+        return
+    
+    status = "включен" if enabled else "выключен"
+    await message.answer(f"✅ SAVE MODE {status} для вашего аккаунта")

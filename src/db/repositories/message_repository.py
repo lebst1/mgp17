@@ -1,5 +1,4 @@
 from sqlalchemy import select, desc, and_, or_
-from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from src.db.models import SavedMessage
 from src.db.session import async_session

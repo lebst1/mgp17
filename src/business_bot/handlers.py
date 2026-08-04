@@ -18,7 +18,6 @@ router = Router()
 # ✅ ПОДКЛЮЧЕНИЕ БИЗНЕС-АККАУНТА
 @router.business_connection()
 async def handle_business_connection(event: BusinessConnection, bot: Bot):
-    """Обработчик подключения бизнес-аккаунта"""
     user_id = event.user.id
     connection_id = event.id
     
@@ -56,7 +55,6 @@ async def handle_business_connection(event: BusinessConnection, bot: Bot):
 # ✅ НОВЫЕ СООБЩЕНИЯ
 @router.business_message()
 async def handle_business_message(message: Message):
-    """Обработчик новых бизнес-сообщений"""
     if message.edit_date is not None:
         return
     
@@ -118,35 +116,28 @@ async def handle_business_message(message: Message):
         logger.error(f"❌ Ошибка сохранения сообщения: {e}")
 
 
-# ✅ УДАЛЕННЫЕ СООБЩЕНИЯ — ИСПРАВЛЕНО!
+# ✅ УДАЛЕННЫЕ СООБЩЕНИЯ — УПРОЩЕННАЯ ВЕРСИЯ
 @router.message(F.business_connection_id.is_not(None))
 async def handle_business_deleted(message: Message):
     """Обработчик удаленных сообщений"""
-    if not message.business_connection_id:
-        return
-    
-    # Проверяем, что это именно удаление (нет текста и нет медиа)
-    if message.text or message.caption:
+    if message.text or message.caption or message.photo or message.video or message.document:
         return
     
     connection_id = message.business_connection_id
+    if not connection_id:
+        return
+    
     logger.info(f"🔍 Получено удаление с connection_id: {connection_id}")
     
-    user = await BusinessRepository.get_user_by_connection(connection_id)
-    if not user:
-        logger.warning(f"⚠️ Неизвестный connection_id: {connection_id}")
-        connection = await BusinessRepository.get_connection(connection_id)
-        if not connection:
-            logger.info(f"💾 connection_id {connection_id} не найден в БД")
-            return
-        if connection:
-            user = await UserRepository.get_by_id(connection.user_id)
-            if not user:
-                logger.warning(f"⚠️ Пользователь {connection.user_id} не найден")
-                return
+    if not message.from_user:
+        logger.warning("⚠️ Нет from_user в удаленном сообщении")
+        return
+    
+    user_id = message.from_user.id
+    user = await UserRepository.get_by_id(user_id)
     
     if not user:
-        logger.warning("⚠️ Пользователь не найден, пропускаем")
+        logger.warning(f"⚠️ Пользователь {user_id} не найден")
         return
     
     logger.info(f"🗑 Удалено сообщение {message.message_id} в чате {message.chat.id} от {user.telegram_id}")
@@ -165,7 +156,6 @@ async def handle_business_deleted(message: Message):
 # ✅ ОТРЕДАКТИРОВАННЫЕ СООБЩЕНИЯ
 @router.business_message()
 async def handle_business_edited(message: Message):
-    """Обработчик отредактированных бизнес-сообщений"""
     if not message.edit_date:
         return
     

@@ -4,7 +4,6 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy import inspect, text
 from src.config import settings
 
-# ✅ ИНИЦИАЛИЗИРУЕМ LOGGER
 logger = logging.getLogger(__name__)
 
 # Создаем базовый класс для моделей
