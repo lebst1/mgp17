@@ -24,16 +24,18 @@ class BusinessRepository:
                 # Обновляем
                 connection.is_enabled = is_enabled
                 connection.last_activity = datetime.utcnow()
+                connection.updated_at = datetime.utcnow()
                 await session.commit()
                 await session.refresh(connection)
                 return connection
             
-            # ✅ ИСПРАВЛЕНО: Используем правильные имена полей
+            # ✅ ИСПРАВЛЕНО: Добавлено поле updated_at
             connection = BusinessConnection(
                 connection_id=connection_id,
                 user_id=user_telegram_id,
                 is_enabled=is_enabled,
-                created_at=datetime.utcnow(),  # ✅ created_at, а не connected_at
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
                 last_activity=datetime.utcnow()
             )
             session.add(connection)
@@ -75,6 +77,7 @@ class BusinessRepository:
             connection = result.scalar_one_or_none()
             if connection:
                 connection.last_activity = datetime.utcnow()
+                connection.updated_at = datetime.utcnow()
                 await session.commit()
     
     @staticmethod

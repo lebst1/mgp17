@@ -4,6 +4,7 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy import inspect, text
 from src.config import settings
 
+# ✅ ИНИЦИАЛИЗИРУЕМ LOGGER
 logger = logging.getLogger(__name__)
 
 # Создаем базовый класс для моделей
@@ -48,10 +49,13 @@ async def init_db():
             if "business_connections" in inspector.get_table_names():
                 columns = [col["name"] for col in inspector.get_columns("business_connections")]
                 
-                # ✅ ИСПРАВЛЕНО: Проверяем правильные имена колонок
                 if "created_at" not in columns:
                     sync_conn.execute(text("ALTER TABLE business_connections ADD COLUMN created_at DATETIME"))
                     logger.info("✅ Добавлена колонка created_at")
+                
+                if "updated_at" not in columns:
+                    sync_conn.execute(text("ALTER TABLE business_connections ADD COLUMN updated_at DATETIME"))
+                    logger.info("✅ Добавлена колонка updated_at")
                 
                 if "last_activity" not in columns:
                     sync_conn.execute(text("ALTER TABLE business_connections ADD COLUMN last_activity DATETIME"))
