@@ -15,11 +15,11 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-# ✅ ПОДКЛЮЧЕНИЕ БИЗНЕС-АККАУНТА
+# ✅ ПОДКЛЮЧЕНИЕ БИЗНЕС-АККАУНТА — ИСПРАВЛЕНО!
 @router.business_connection()
 async def handle_business_connection(event: BusinessConnection):
     user_id = event.user.id
-    connection_id = event.connection_id
+    connection_id = event.id  # ✅ Вместо event.connection_id используем event.id
     
     logger.info(f"🔗 Business подключение: {connection_id}")
     logger.info(f"👤 Пользователь: {user_id}")
@@ -138,7 +138,7 @@ async def handle_business_deleted(event: BusinessMessagesDeleted):
 # ✅ ОТРЕДАКТИРОВАННЫЕ СООБЩЕНИЯ (через магический фильтр F)
 @router.business_message(F.edit_date.is_not(None))
 async def handle_business_edited(message: Message):
-    """Обработчик отредактированных бизнес-сообщений (используем F.edit_date)"""
+    """Обработчик отредактированных бизнес-сообщений"""
     if not message.from_user:
         return
     
