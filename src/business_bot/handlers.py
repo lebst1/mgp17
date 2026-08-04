@@ -1,7 +1,7 @@
 import logging
 import json
 from aiogram import Router, F, Bot
-from aiogram.types import Message, BusinessConnection, BusinessMessagesDeleted
+from aiogram.types import Message, BusinessConnection
 from aiogram.filters import Command
 from datetime import datetime
 from src.db.repositories.user_repository import UserRepository
@@ -26,7 +26,6 @@ async def handle_business_connection(event: BusinessConnection, bot: Bot):
     logger.info(f"👤 Пользователь: {user_id}")
     logger.info(f"📊 Статус: {event.is_enabled}")
     
-    # Создаем или обновляем пользователя
     user = await UserRepository.get_or_create(
         telegram_id=user_id,
         username=event.user.username,
@@ -34,14 +33,12 @@ async def handle_business_connection(event: BusinessConnection, bot: Bot):
         last_name=event.user.last_name
     )
     
-    # Сохраняем подключение
-    connection = await BusinessRepository.save_connection(
+    await BusinessRepository.save_connection(
         connection_id=connection_id,
         user_telegram_id=user_id,
         is_enabled=event.is_enabled
     )
     
-    # Отправляем приветствие через бота
     try:
         await bot.send_message(
             chat_id=user_id,
@@ -60,7 +57,6 @@ async def handle_business_connection(event: BusinessConnection, bot: Bot):
 @router.business_message()
 async def handle_business_message(message: Message):
     """Обработчик новых бизнес-сообщений"""
-    # Проверяем, что это НЕ отредактированное сообщение
     if message.edit_date is not None:
         return
     
@@ -71,7 +67,6 @@ async def handle_business_message(message: Message):
     if not connection_id:
         return
     
-    # Логируем connection_id для отладки
     logger.info(f"📩 Новое сообщение с connection_id: {connection_id}")
     
     user = await BusinessRepository.get_user_by_connection(connection_id)
@@ -123,28 +118,27 @@ async def handle_business_message(message: Message):
         logger.error(f"❌ Ошибка сохранения сообщения: {e}")
 
 
-# ✅ УДАЛЕННЫЕ СООБЩЕНИЯ — ИСПРАВЛЕННАЯ ВЕРСИЯ!
-@router.business_messages_deleted()
-async def handle_business_deleted(event: BusinessMessagesDeleted):
-    """Обработчик удаленных бизнес-сообщений"""
-    connection_id = event.business_connection_id
-    if not connection_id:
-        logger.warning("⚠️ Нет connection_id в событии удаления")
+# ✅ УДАЛЕННЫЕ СООБЩЕНИЯ — ИСПРАВЛЕНО!
+@router.message(F.business_connection_id.is_not(None))
+async def handle_business_deleted(message: Message):
+    """Обработчик удаленных сообщений"""
+    if not message.business_connection_id:
         return
     
+    # Проверяем, что это именно удаление (нет текста и нет медиа)
+    if message.text or message.caption:
+        return
+    
+    connection_id = message.business_connection_id
     logger.info(f"🔍 Получено удаление с connection_id: {connection_id}")
     
-    # Получаем пользователя по connection_id
     user = await BusinessRepository.get_user_by_connection(connection_id)
     if not user:
         logger.warning(f"⚠️ Неизвестный connection_id: {connection_id}")
-        # Пробуем найти connection_id в БД
         connection = await BusinessRepository.get_connection(connection_id)
         if not connection:
             logger.info(f"💾 connection_id {connection_id} не найден в БД")
-            # Временно пропускаем, так как не знаем user_id
             return
-        # Если connection есть, но user не найден — пробуем получить user_id из connection
         if connection:
             user = await UserRepository.get_by_id(connection.user_id)
             if not user:
@@ -155,24 +149,26 @@ async def handle_business_deleted(event: BusinessMessagesDeleted):
         logger.warning("⚠️ Пользователь не найден, пропускаем")
         return
     
-    logger.info(f"🗑 Удалены сообщения: {event.message_ids} в чате {event.chat.id} от {user.telegram_id}")
+    logger.info(f"🗑 Удалено сообщение {message.message_id} в чате {message.chat.id} от {user.telegram_id}")
     
-    for message_id in event.message_ids:
-        try:
-            await MessageRepository.mark_as_deleted(
-                message_id=message_id,
-                chat_id=event.chat.id,
-                user_id=user.telegram_id
-            )
-            logger.info(f"✅ Сообщение {message_id} отмечено как удаленное")
-        except Exception as e:
-            logger.error(f"❌ Ошибка обработки удаления для сообщения {message_id}: {e}")
+    try:
+        await MessageRepository.mark_as_deleted(
+            message_id=message.message_id,
+            chat_id=message.chat.id,
+            user_id=user.telegram_id
+        )
+        logger.info(f"✅ Сообщение {message.message_id} отмечено как удаленное")
+    except Exception as e:
+        logger.error(f"❌ Ошибка обработки удаления: {e}")
 
 
 # ✅ ОТРЕДАКТИРОВАННЫЕ СООБЩЕНИЯ
-@router.business_message(F.edit_date.is_not(None))
+@router.business_message()
 async def handle_business_edited(message: Message):
     """Обработчик отредактированных бизнес-сообщений"""
+    if not message.edit_date:
+        return
+    
     if not message.from_user:
         return
     
@@ -215,7 +211,6 @@ async def handle_business_edited(message: Message):
 # ✅ КОМАНДА /business_status
 @router.message(Command("business_status"))
 async def business_status(message: Message):
-    """Проверить статус бизнес-подключения"""
     user = await UserRepository.get_by_id(message.from_user.id)
     connections = await BusinessRepository.get_user_connections(message.from_user.id)
     
@@ -227,12 +222,6 @@ async def business_status(message: Message):
 📝 SAVE MODE: {'✅ Включен' if user.savemode_enabled else '❌ Выключен'}
 🔗 Подключений: {len(connections)}
 📊 Сохранено сообщений: {user.messages_saved}
-
-<b>Как проверить работу:</b>
-1. Подключите бота в Настройки → Telegram Business → Чат-боты
-2. Добавьте бота в чат как администратора
-3. Удалите любое сообщение в чате
-4. Бот сохранит его в базу данных
 """
     
     if connections:
@@ -250,7 +239,6 @@ async def business_status(message: Message):
 # ✅ КОМАНДА /savemode
 @router.message(Command("savemode"))
 async def toggle_savemode(message: Message):
-    """Включить/выключить SAVE MODE для пользователя"""
     args = message.text.split()
     
     if len(args) < 2:
