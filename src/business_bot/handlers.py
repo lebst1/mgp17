@@ -19,7 +19,6 @@ MAX_FILE_SIZE = settings.MAX_MEDIA_SIZE_MB * 1024 * 1024
 
 
 async def download_media(bot: Bot, file_id: str) -> str:
-    """Скачивает медиафайл и возвращает путь к нему"""
     try:
         os.makedirs(MEDIA_DIR, exist_ok=True)
         file = await bot.get_file(file_id)
@@ -39,10 +38,8 @@ async def download_media(bot: Bot, file_id: str) -> str:
 
 
 async def send_deleted_notification(bot: Bot, user_id: int, saved_msg):
-    """Уведомление об удалении (как на скрине)"""
-    
     username = saved_msg.from_username or 'пользователь'
-    text = f"""<!>Xwexafi</> (@{username})
+    text = f"""<b>{username}</b>
 
 🗑 удалил сообщение.
 
@@ -75,10 +72,8 @@ async def send_deleted_notification(bot: Bot, user_id: int, saved_msg):
 
 
 async def send_edit_notification(bot: Bot, user_id: int, saved_msg, old_text: str, new_text: str):
-    """Уведомление о правке (как на скрине)"""
-    
     username = saved_msg.from_username or 'пользователь'
-    text = f"""<!>Xwexafi</> (@{username})
+    text = f"""<b>{username}</b>
 
 ✏️ отредактировал сообщение.
 
@@ -110,6 +105,7 @@ async def send_edit_notification(bot: Bot, user_id: int, saved_msg, old_text: st
     await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
 
 
+# Остальные хендлеры такие же, как в предыдущей версии
 @router.business_connection()
 async def handle_business_connection(event: BusinessConnection, bot: Bot):
     user_id = event.user.id
@@ -203,7 +199,6 @@ async def handle_business_message(message: Message):
                 logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
             else:
                 media_path = await download_media(message.bot, media_file_id)
-                
         elif message.video:
             media_type = "video"
             media_file_id = message.video.file_id
@@ -212,7 +207,6 @@ async def handle_business_message(message: Message):
                 logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
             else:
                 media_path = await download_media(message.bot, media_file_id)
-                
         elif message.document:
             media_type = "document"
             media_file_id = message.document.file_id
@@ -221,7 +215,6 @@ async def handle_business_message(message: Message):
                 logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
             else:
                 media_path = await download_media(message.bot, media_file_id)
-                
         elif message.audio:
             media_type = "audio"
             media_file_id = message.audio.file_id
@@ -230,7 +223,6 @@ async def handle_business_message(message: Message):
                 logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
             else:
                 media_path = await download_media(message.bot, media_file_id)
-                
         elif message.voice:
             media_type = "voice"
             media_file_id = message.voice.file_id
@@ -239,7 +231,6 @@ async def handle_business_message(message: Message):
                 logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
             else:
                 media_path = await download_media(message.bot, media_file_id)
-                
         elif message.sticker:
             media_type = "sticker"
             media_file_id = message.sticker.file_id
@@ -257,7 +248,6 @@ async def handle_business_message(message: Message):
         
         await MessageRepository.save_message(message_data)
         logger.info(f"💾 Сохранено сообщение от {user.telegram_id} в чате {message.chat.id}")
-        
     except Exception as e:
         logger.error(f"❌ Ошибка сохранения сообщения: {e}")
 
@@ -281,14 +271,12 @@ async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
                 chat_id=event.chat.id,
                 user_id=owner.telegram_id
             )
-            
             if saved_msg:
                 saved_msg.is_deleted = True
                 async with async_session() as session:
                     await session.merge(saved_msg)
                     await session.commit()
                 logger.info(f"✅ Сообщение {message_id} отмечено как удаленное")
-
                 if saved_msg.from_user_id != owner.telegram_id:
                     await send_deleted_notification(bot, owner.telegram_id, saved_msg)
                     logger.info(f"✅ Уведомление отправлено владельцу {owner.telegram_id}")
@@ -296,57 +284,45 @@ async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
                     logger.info(f"ℹ️ Сообщение {message_id} удалено владельцем, уведомление не отправляем")
             else:
                 logger.warning(f"⚠️ Сообщение {message_id} не найдено в БД")
-                
         except Exception as e:
             logger.error(f"❌ Ошибка обработки удаления: {e}")
 
 
 @router.edited_business_message()
 async def handle_business_edited(message: Message):
-    """Обработчик отредактированных бизнес-сообщений"""
     if not message.from_user:
         return
-    
     connection_id = message.business_connection_id
     if not connection_id:
         return
-    
     user = await BusinessRepository.get_user_by_connection(connection_id)
     if not user:
         logger.warning(f"⚠️ Пользователь не найден для connection_id: {connection_id}")
         return
-    
     logger.info(f"✏️ Отредактировано сообщение {message.message_id} от {user.telegram_id}")
     logger.info(f"📝 Новый текст: {message.text or message.caption}")
-    
     try:
         saved_msg = await MessageRepository.get_by_id_and_chat(
             message_id=message.message_id,
             chat_id=message.chat.id,
             user_id=user.telegram_id
         )
-        
         if saved_msg:
             old_text = saved_msg.text or ""
             new_text = message.text or message.caption or ""
-            
             history = json.loads(saved_msg.edit_history) if saved_msg.edit_history else []
             history.append({
                 "old_text": old_text,
                 "new_text": new_text,
                 "edited_at": datetime.utcnow().isoformat()
             })
-            
             saved_msg.text = new_text
             saved_msg.is_edited = True
             saved_msg.edit_history = json.dumps(history[-10:])
-            
             async with async_session() as session:
                 await session.merge(saved_msg)
                 await session.commit()
-                
             logger.info(f"✅ Обновлена история правок для сообщения {message.message_id}")
-            
             if saved_msg.from_user_id != user.telegram_id:
                 await send_edit_notification(message.bot, user.telegram_id, saved_msg, old_text, new_text)
                 logger.info(f"✅ Уведомление о правке отправлено владельцу {user.telegram_id}")
@@ -354,7 +330,6 @@ async def handle_business_edited(message: Message):
                 logger.info(f"ℹ️ Сообщение {message.message_id} отредактировано владельцем")
         else:
             logger.warning(f"⚠️ Сообщение {message.message_id} не найдено в БД")
-            
     except Exception as e:
         logger.error(f"❌ Ошибка обработки правки: {e}")
 
@@ -369,9 +344,7 @@ async def business_status(message: Message):
             first_name=message.from_user.first_name,
             last_name=message.from_user.last_name
         )
-    
     connections = await BusinessRepository.get_user_connections(message.from_user.id)
-    
     status_text = f"""
 📊 <b>Статус Business подключения</b>
 
@@ -381,7 +354,6 @@ async def business_status(message: Message):
 🔗 Подключений: {len(connections)}
 📊 Сохранено сообщений: {user.messages_saved}
 """
-    
     if connections:
         status_text += "\n<b>Активные подключения:</b>\n"
         for conn in connections:
@@ -390,30 +362,23 @@ async def business_status(message: Message):
                 status_text += f"  Подключен: {conn.created_at.strftime('%d.%m.%Y %H:%M')}\n"
             else:
                 status_text += "  Подключен: Неизвестно\n"
-    
     await message.answer(status_text, parse_mode="HTML")
 
 
 @router.message(Command("savemode"))
 async def toggle_savemode(message: Message):
     args = message.text.split()
-    
     if len(args) < 2:
         await message.answer("ℹ️ Использование: /savemode on - включить, /savemode off - выключить")
         return
-    
     action = args[1].lower()
-    
     if action not in ["on", "off"]:
         await message.answer("❌ Используйте 'on' или 'off'")
         return
-    
     enabled = action == "on"
     user = await UserRepository.update_settings(message.from_user.id, savemode_enabled=enabled)
-    
     if not user:
         await message.answer("❌ Ошибка: пользователь не найден")
         return
-    
     status = "включен" if enabled else "выключен"
     await message.answer(f"✅ SAVE MODE {status} для вашего аккаунта")
