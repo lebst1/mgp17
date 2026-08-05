@@ -7,10 +7,20 @@ from src.db.repositories.business_repository import BusinessRepository
 router = Router()
 
 
-# ✅ ГЛАВНОЕ МЕНЮ (СТАРТ)
+# ✅ ГЛАВНОЕ МЕНЮ (СТАРТ) — С ПРОВЕРКОЙ ПОЛЬЗОВАТЕЛЯ
 @router.message(Command("start"))
 async def start_command(message: Message):
+    # ✅ ПРОВЕРЯЕМ, ЕСТЬ ЛИ ПОЛЬЗОВАТЕЛЬ В БД
     user = await UserRepository.get_by_id(message.from_user.id)
+    if not user:
+        # Если нет — создаём
+        user = await UserRepository.get_or_create(
+            telegram_id=message.from_user.id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name,
+            last_name=message.from_user.last_name
+        )
+    
     connections = await BusinessRepository.get_user_connections(message.from_user.id)
     has_business = len(connections) > 0
     
@@ -38,7 +48,7 @@ async def start_command(message: Message):
     await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 
-# ✅ КОПИРОВАНИЕ USERNAME (всплывашка)
+# ✅ КОПИРОВАНИЕ USERNAME
 @router.callback_query(lambda c: c.data == "copy_username")
 async def copy_username(callback: CallbackQuery):
     await callback.answer(
@@ -47,7 +57,7 @@ async def copy_username(callback: CallbackQuery):
     )
 
 
-# ✅ ПОМОЩЬ / КОМАНДЫ (редактирует сообщение)
+# ✅ ПОМОЩЬ / КОМАНДЫ
 @router.callback_query(lambda c: c.data == "show_help")
 async def show_help(callback: CallbackQuery):
     text = """
@@ -61,12 +71,6 @@ async def show_help(callback: CallbackQuery):
 /search — 🔍 Поиск
 /edits — ✏️ Правки
 /media — 🖼️ Медиа
-/summary — 📋 Выжимка
-/todos — ✅ Задачи
-/remind — ⏰ Напоминание
-/digest — 📰 Дайджест
-/autoreply — 🤖 Автоответ
-/profile — 👤 Профиль
 /business_status — 📊 Статус
 """
     
@@ -96,7 +100,7 @@ async def show_business_status(callback: CallbackQuery):
     await business_status(callback.message)
 
 
-# ✅ НАСТРОЙКИ (редактирует сообщение)
+# ✅ НАСТРОЙКИ
 @router.callback_query(lambda c: c.data == "settings")
 async def show_settings(callback: CallbackQuery):
     text = """
@@ -176,6 +180,7 @@ async def autoreply_settings(callback: CallbackQuery):
 @router.callback_query(lambda c: c.data == "back_to_start")
 async def back_to_start(callback: CallbackQuery):
     await callback.answer()
+    # Передаём callback.message, а не просто message
     await start_command(callback.message)
 
 
@@ -200,7 +205,7 @@ async def autoreply_off(callback: CallbackQuery):
     await callback.answer("🤖 Автоответчик выключен! Используй /autoreply off")
 
 
-# ✅ КОМАНДА /help (тоже редактирует)
+# ✅ КОМАНДА /help
 @router.message(Command("help"))
 async def help_command(message: Message):
     await show_help(message)
