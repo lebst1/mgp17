@@ -1,7 +1,7 @@
 import logging
 import json
 from aiogram import Router, F, Bot
-from aiogram.types import Message, BusinessConnection
+from aiogram.types import Message, BusinessConnection, BusinessMessagesDeleted
 from aiogram.filters import Command
 from datetime import datetime
 from src.db.repositories.user_repository import UserRepository
@@ -121,51 +121,35 @@ async def handle_business_message(message: Message):
         logger.error(f"❌ Ошибка сохранения сообщения: {e}")
 
 
-# ✅ УДАЛЕННЫЕ СООБЩЕНИЯ — ПРОСТОЙ И РАБОЧИЙ СПОСОБ (БЕЗ @router.update!)
-@router.business_message()
-async def handle_business_deleted(message: Message, bot: Bot):
-    """Обработчик удаленных сообщений"""
-    # Если есть текст или медиа — это не удаление
-    if message.text or message.caption or message.photo or message.video or message.document:
-        return
-    
-    connection_id = message.business_connection_id
-    if not connection_id:
-        return
-    
-    logger.info(f"🔍 Получено удаление с connection_id: {connection_id}")
-    logger.info(f"📋 message_id: {message.message_id}")
-    logger.info(f"📌 chat_id: {message.chat.id}")
+# ✅ ПРАВИЛЬНЫЙ ОБРАБОТЧИК УДАЛЕННЫХ СООБЩЕНИЙ
+@router.business_messages_deleted()
+async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
+    """Обработчик удаленных бизнес-сообщений"""
+    logger.info(f"🔍 Получено удаление бизнес-сообщений!")
+    logger.info(f"🔗 business_connection_id: {event.business_connection_id}")
+    logger.info(f"📋 message_ids: {event.message_ids}")
+    logger.info(f"📌 chat_id: {event.chat.id}")
 
-    user = await BusinessRepository.get_user_by_connection(connection_id)
+    user = await BusinessRepository.get_user_by_connection(event.business_connection_id)
     if not user:
-        logger.warning(f"⚠️ Пользователь не найден для connection_id: {connection_id}")
-        if message.from_user:
-            user = await UserRepository.get_by_id(message.from_user.id)
-            if user:
-                await BusinessRepository.get_or_create_connection_by_user(
-                    connection_id=connection_id,
-                    user_id=user.telegram_id
-                )
-    
-    if not user:
-        logger.warning("⚠️ Пользователь не найден, пропускаем")
+        logger.warning(f"⚠️ Пользователь не найден для connection_id: {event.business_connection_id}")
         return
 
-    try:
-        await MessageRepository.mark_as_deleted(
-            message_id=message.message_id,
-            chat_id=message.chat.id,
-            user_id=user.telegram_id
-        )
-        logger.info(f"✅ Сообщение {message.message_id} отмечено как удаленное")
-    except Exception as e:
-        logger.error(f"❌ Ошибка обработки удаления: {e}")
+    for message_id in event.message_ids:
+        try:
+            await MessageRepository.mark_as_deleted(
+                message_id=message_id,
+                chat_id=event.chat.id,
+                user_id=user.telegram_id
+            )
+            logger.info(f"✅ Сообщение {message_id} отмечено как удаленное")
+        except Exception as e:
+            logger.error(f"❌ Ошибка обработки удаления: {e}")
 
     try:
         await bot.send_message(
             chat_id=user.telegram_id,
-            text=f"🗑 Удалено сообщение {message.message_id} в чате {message.chat.id}",
+            text=f"🗑 Удалено {len(event.message_ids)} сообщений в чате {event.chat.id}",
             parse_mode="HTML"
         )
         logger.info(f"✅ Уведомление об удалении отправлено пользователю {user.telegram_id}")
