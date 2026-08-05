@@ -38,12 +38,19 @@ async def download_media(bot: Bot, file_id: str) -> str:
 
 
 async def send_deleted_notification(bot: Bot, user_id: int, saved_msg):
-    username = saved_msg.from_username or "пользователь"
+    username = saved_msg.from_username or "unknown"
+    first_name = saved_msg.from_first_name or "Пользователь"
+
+    delete_time = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
 
     text = f"""
-🗑️ <b>{username}</b> удалил сообщение.
+🗑️ <b>Удалено сообщение</b>
 
-<blockquote>{saved_msg.text or 'Медиафайл'}</blockquote>
+👤 <a href="tg://user?id={saved_msg.from_user_id}">{first_name}</a>
+📛 @{username}
+🕒 <code>{delete_time}</code>
+
+<blockquote>{saved_msg.text or '📎 Медиафайл'}</blockquote>
 """
 
     media_path = saved_msg.media_path
@@ -111,7 +118,6 @@ async def send_deleted_notification(bot: Bot, user_id: int, saved_msg):
         parse_mode="HTML"
     )
 
-
 async def send_edit_notification(
     bot: Bot,
     user_id: int,
@@ -119,14 +125,21 @@ async def send_edit_notification(
     old_text: str,
     new_text: str
 ):
-    username = saved_msg.from_username or "пользователь"
+    username = saved_msg.from_username or "unknown"
+    first_name = saved_msg.from_first_name or "Пользователь"
+
+    edit_time = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
 
     text = f"""
-✏️ <b>{username}</b> отредактировал сообщение.
+✏️ <b>Изменено сообщение</b>
+
+👤 <a href="tg://user?id={saved_msg.from_user_id}">{first_name}</a>
+📛 @{username}
+🕒 <code>{edit_time}</code>
 
 <blockquote>{old_text or 'Без текста'}</blockquote>
 
-↓↓↓
+⬇️⬇️⬇️
 
 <blockquote>{new_text or 'Без текста'}</blockquote>
 """
