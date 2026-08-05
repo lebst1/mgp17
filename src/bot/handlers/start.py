@@ -8,21 +8,8 @@ import os
 router = Router()
 
 
-# ✅ ГЛАВНОЕ МЕНЮ (СТАРТ) С ФОТО
-@router.message(Command("start"))
-async def start_command(message: Message):
-    user = await UserRepository.get_by_id(message.from_user.id)
-    if not user:
-        user = await UserRepository.get_or_create(
-            telegram_id=message.from_user.id,
-            username=message.from_user.username,
-            first_name=message.from_user.first_name,
-            last_name=message.from_user.last_name
-        )
-    
-    connections = await BusinessRepository.get_user_connections(message.from_user.id)
-    has_business = len(connections) > 0
-    
+# ✅ ОСНОВНОЕ МЕНЮ
+async def get_main_menu(user, has_business):
     text = f"""
 <b>SafeSaverX</b>
 
@@ -60,18 +47,42 @@ async def start_command(message: Message):
         ]
     ])
     
-    # ✅ ОТПРАВКА ФОТО С ТЕКСТОМ
+    return text, keyboard
+
+
+# ✅ ОТПРАВКА ГЛАВНОГО МЕНЮ
+async def send_main_menu(target, user, has_business):
+    text, keyboard = await get_main_menu(user, has_business)
     photo_path = "assets/menu.jpg"
+    
     if os.path.exists(photo_path):
         photo = FSInputFile(photo_path)
-        await message.answer_photo(
+        await target.answer_photo(
             photo=photo,
             caption=text,
             reply_markup=keyboard,
             parse_mode="HTML"
         )
     else:
-        await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+        await target.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+# ✅ ГЛАВНОЕ МЕНЮ (СТАРТ)
+@router.message(Command("start"))
+async def start_command(message: Message):
+    user = await UserRepository.get_by_id(message.from_user.id)
+    if not user:
+        user = await UserRepository.get_or_create(
+            telegram_id=message.from_user.id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name,
+            last_name=message.from_user.last_name
+        )
+    
+    connections = await BusinessRepository.get_user_connections(message.from_user.id)
+    has_business = len(connections) > 0
+    
+    await send_main_menu(message, user, has_business)
 
 
 # ✅ КОПИРОВАНИЕ ЮЗЕРНЕЙМ
@@ -107,7 +118,15 @@ async def show_help(callback: CallbackQuery):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")]
     ])
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    
+    # ✅ Проверяем, можно ли редактировать
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        # Если нельзя редактировать — удаляем и отправляем новое
+        await callback.message.delete()
+        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    
     await callback.answer()
 
 
@@ -124,7 +143,13 @@ async def important(callback: CallbackQuery):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")]
     ])
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        await callback.message.delete()
+        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    
     await callback.answer()
 
 
@@ -144,7 +169,13 @@ async def show_settings(callback: CallbackQuery):
             InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")
         ]
     ])
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        await callback.message.delete()
+        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    
     await callback.answer()
 
 
@@ -165,7 +196,13 @@ async def savemode_settings(callback: CallbackQuery):
             InlineKeyboardButton(text="🔙 Назад", callback_data="settings")
         ]
     ])
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        await callback.message.delete()
+        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    
     await callback.answer()
 
 
@@ -173,7 +210,25 @@ async def savemode_settings(callback: CallbackQuery):
 @router.callback_query(lambda c: c.data == "back_to_start")
 async def back_to_start(callback: CallbackQuery):
     await callback.answer()
-    await start_command(callback.message)
+    
+    user = await UserRepository.get_by_id(callback.from_user.id)
+    if not user:
+        user = await UserRepository.get_or_create(
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            first_name=callback.from_user.first_name,
+            last_name=callback.from_user.last_name
+        )
+    
+    connections = await BusinessRepository.get_user_connections(callback.from_user.id)
+    has_business = len(connections) > 0
+    
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    
+    await send_main_menu(callback.message, user, has_business)
 
 
 # ✅ ЗАГЛУШКИ
@@ -190,10 +245,35 @@ async def savemode_off(callback: CallbackQuery):
 # ✅ КОМАНДА /help
 @router.message(Command("help"))
 async def help_command(message: Message):
-    await show_help(message)
+    text = """
+❓ <b>Команды SafeSaverX</b>
+
+/start — Главное меню
+/help — Список команд
+/settings — Настройки
+/savemode on — Включить SAVE MODE
+/savemode off — Выключить SAVE MODE
+"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")]
+    ])
+    await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 
 # ✅ КОМАНДА /settings
 @router.message(Command("settings"))
 async def settings_command(message: Message):
-    await show_settings(message)
+    text = """
+⚙️ <b>Настройки</b>
+
+▸ SAVE MODE — включить/выключить сохранение
+"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📝 SAVE MODE", callback_data="savemode_settings")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")
+        ]
+    ])
+    await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
