@@ -66,3 +66,23 @@ class UserRepository:
             await session.commit()
             await session.refresh(user)
             return user
+    
+    # ✅ НОВЫЙ МЕТОД
+    @staticmethod
+    async def check_access(telegram_id: int) -> bool:
+        """Проверить, имеет ли пользователь доступ к боту"""
+        from src.config import settings
+        
+        # Если публичный режим, проверяем бан-лист
+        if settings.PUBLIC_MODE:
+            if telegram_id in settings.BANNED_USERS:
+                return False
+            
+            user = await UserRepository.get_by_id(telegram_id)
+            return user.is_active if user else True
+        
+        # Если приватный режим, проверяем список разрешенных
+        else:
+            if settings.ALLOWED_USERS and telegram_id not in settings.ALLOWED_USERS:
+                return False
+            return True
