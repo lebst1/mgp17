@@ -49,7 +49,7 @@ async def get_main_menu(user, has_business):
 [
     InlineKeyboardButton(
         text="✏️ Редактирование профиля",
-        url="https://t.me/laosllebot"
+        url="tg://settings"
     )
 ],
     [
