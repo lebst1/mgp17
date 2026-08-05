@@ -14,6 +14,7 @@ from src.db.repositories.subscription_repository import SubscriptionRepository
 from src.config import settings
 import os
 import logging
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -67,20 +68,30 @@ async def check_subscription(callback: CallbackQuery, bot: Bot):
 
 
 async def get_main_menu(user, has_business):
+    # ✅ Получаем подписку
+    subscription = await SubscriptionRepository.get_or_create_subscription(user.telegram_id)
+    
+    days_left = 0
+    if subscription.expires_at:
+        days_left = (subscription.expires_at - datetime.utcnow()).days
+    
+    status_emoji = "✅" if subscription.is_active and days_left > 0 else "❌"
+    
     text = f"""
 <b>SafeSaverX</b>
 
 👤 <b>Профиль</b>
 ▸ Статус: <b>{'активен' if user.is_active else 'неактивен'}</b>
 ▸ SAVE MODE: <b>{'включен' if user.savemode_enabled else 'выключен'}</b>
-▸ Business: <b>{'подключен' if has_business else 'не подключен'}</b>
+▸ Подписка: {status_emoji} <b>{'активна' if days_left > 0 else 'неактивна'}</b>
+▸ Осталось дней: <b>{days_left if days_left > 0 else '0'}</b>
 
 📌 <b>Как подключить бота:</b>
 1. Нажми «📋 Скопировать юзернейм»
 2. Открой Настройки Telegram → Редактирование профиля
 3. Выбери «Автоматизация действий»
 4. Вставь скопированный юзернейм
-5. Дай все разрешения на сообщения!
+5. Дай разрешения на все сообщения!
 
 <b>Что умеет бот:</b>
 • Присылает уведомления, когда собеседник удаляет сообщение
@@ -341,6 +352,46 @@ async def savemode_off(callback: CallbackQuery):
     await callback.answer("❌ SAVE MODE выключен! Используй /savemode off")
 
 
+# ✅ ПОДПИСКА (НОВЫЙ ОБРАБОТЧИК)
+@router.callback_query(lambda c: c.data == "subscribe_info")
+async def subscribe_info_callback(callback: CallbackQuery):
+    await callback.answer()
+    from .subscription import subscribe_info
+    await subscribe_info(callback.message)
+
+
+# ✅ РЕФЕРАЛКА (НОВЫЙ ОБРАБОТЧИК)
+@router.callback_query(lambda c: c.data == "subscribe_referral")
+async def subscribe_referral_callback(callback: CallbackQuery):
+    await callback.answer()
+    from .subscription import subscribe_referral
+    await subscribe_referral(callback)
+
+
+# ✅ КУПИТЬ (НОВЫЙ ОБРАБОТЧИК)
+@router.callback_query(lambda c: c.data == "subscribe_buy")
+async def subscribe_buy_callback(callback: CallbackQuery):
+    await callback.answer()
+    from .subscription import subscribe_buy
+    await subscribe_buy(callback)
+
+
+# ✅ НАЗАД К ПОДПИСКЕ (НОВЫЙ ОБРАБОТЧИК)
+@router.callback_query(lambda c: c.data == "subscribe_back")
+async def subscribe_back_callback(callback: CallbackQuery):
+    await callback.answer()
+    from .subscription import subscribe_back
+    await subscribe_back(callback)
+
+
+# ✅ КОПИРОВАТЬ ССЫЛКУ (НОВЫЙ ОБРАБОТЧИК)
+@router.callback_query(lambda c: c.data == "copy_referral")
+async def copy_referral_callback(callback: CallbackQuery):
+    await callback.answer()
+    from .subscription import copy_referral
+    await copy_referral(callback)
+
+
 @router.message(Command("help"))
 async def help_command(message: Message):
     await show_help(message)
@@ -349,10 +400,3 @@ async def help_command(message: Message):
 @router.message(Command("settings"))
 async def settings_command(message: Message):
     await show_settings(message)
-
-
-@router.callback_query(lambda c: c.data == "subscribe_info")
-async def subscribe_info_callback(callback: CallbackQuery):
-    await callback.answer()
-    from .subscription import subscribe_info
-    await subscribe_info(callback.message)
