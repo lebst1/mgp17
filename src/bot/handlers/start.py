@@ -12,49 +12,50 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-async def is_subscribed(user_id: int, bot: Bot) -> bool:
-    """Проверяет, подписан ли пользователь на канал"""
-    if not settings.REQUIRED_CHANNEL_ID:
-        return True
+@router.callback_query(lambda c: c.data == "check_subscription")
+async def check_subscription(callback: CallbackQuery, bot: Bot):
+    user_id = callback.from_user.id
     
     try:
         member = await bot.get_chat_member(
             chat_id=settings.REQUIRED_CHANNEL_ID,
             user_id=user_id
         )
-        return member.status not in ['left', 'kicked']
+        
+        if member.status in ['left', 'kicked']:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="📢 Подписаться на канал",
+                        url=settings.REQUIRED_CHANNEL_URL
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="🔄 Проверить подписку",
+                        callback_data="check_subscription"
+                    )
+                ]
+            ])
+            await callback.message.edit_text(
+                f"📢 <b>Вы ещё не подписаны на канал!</b>\n\n"
+                f"Подпишитесь и нажмите «Проверить подписку».",
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+        else:
+            await callback.message.edit_text(
+                "✅ <b>Спасибо за подписку!</b>\n\n"
+                "Теперь вы можете пользоваться ботом.\n"
+                "Напишите /start, чтобы начать.",
+                parse_mode="HTML"
+            )
+            
     except Exception as e:
-        logger.error(f"Ошибка проверки подписки: {e}")
-        return False
-
-
-async def send_subscription_required(target, bot: Bot):
-    """Отправляет сообщение о необходимости подписки"""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="📢 Подписаться на канал",
-                url=settings.REQUIRED_CHANNEL_URL
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text="🔄 Проверить подписку",
-                callback_data="check_subscription"
-            )
-        ]
-    ])
+        logger.error(f"❌ Ошибка проверки подписки: {e}")
+        await callback.answer("❌ Ошибка проверки, попробуйте позже.", show_alert=True)
     
-    text = f"""
-📢 <b>Подпишитесь на наш канал!</b>
-
-Для использования бота необходимо подписаться на канал:
-{settings.REQUIRED_CHANNEL_URL}
-
-После подписки нажмите «Проверить подписку».
-"""
-    
-    await target.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
 
 
 async def get_main_menu(user, has_business):
@@ -120,7 +121,7 @@ async def send_main_menu(target, user, has_business):
 
 
 @router.message(Command("start"))
-async def start_command(message: Message, bot: Bot):
+async def start_command(message: Message):
     user = await UserRepository.get_by_id(message.from_user.id)
     if not user:
         user = await UserRepository.get_or_create(
@@ -130,60 +131,10 @@ async def start_command(message: Message, bot: Bot):
             last_name=message.from_user.last_name
         )
     
-    # ✅ ПРОВЕРЯЕМ ПОДПИСКУ
-    if not await is_subscribed(message.from_user.id, bot):
-        await send_subscription_required(message, bot)
-        return
-    
     connections = await BusinessRepository.get_user_connections(message.from_user.id)
     has_business = len(connections) > 0
     
     await send_main_menu(message, user, has_business)
-
-
-@router.message(Command("subscribe"))
-async def subscribe_command(message: Message, bot: Bot):
-    """Проверка подписки из любого места"""
-    if await is_subscribed(message.from_user.id, bot):
-        await message.answer("✅ Вы уже подписаны на канал!")
-    else:
-        await send_subscription_required(message, bot)
-
-
-@router.callback_query(lambda c: c.data == "check_subscription")
-async def check_subscription(callback: CallbackQuery, bot: Bot):
-    user_id = callback.from_user.id
-    
-    if await is_subscribed(user_id, bot):
-        await callback.message.edit_text(
-            "✅ <b>Спасибо за подписку!</b>\n\n"
-            "Теперь вы можете пользоваться ботом.\n"
-            "Напишите /start, чтобы начать.",
-            parse_mode="HTML"
-        )
-    else:
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="📢 Подписаться на канал",
-                    url=settings.REQUIRED_CHANNEL_URL
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🔄 Проверить подписку",
-                    callback_data="check_subscription"
-                )
-            ]
-        ])
-        await callback.message.edit_text(
-            f"📢 <b>Вы ещё не подписаны на канал!</b>\n\n"
-            f"Подпишитесь и нажмите «Проверить подписку».",
-            reply_markup=keyboard,
-            parse_mode="HTML"
-        )
-    
-    await callback.answer()
 
 
 @router.callback_query(lambda c: c.data == "copy_username")

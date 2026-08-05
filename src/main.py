@@ -15,10 +15,8 @@ from src.bot.handlers import start_router, savemode_router
 from src.business_bot.handlers import router as business_router
 from src.tasks import scheduled_cleanup
 
-# Папка для логов
 os.makedirs("logs", exist_ok=True)
 
-# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -34,13 +32,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def setup_dispatcher() -> Dispatcher:
+async def setup_dispatcher(bot: Bot) -> Dispatcher:
+    """Настройка диспетчера"""
     dp = Dispatcher()
-    dp.message.middleware(AuthMiddleware())
-    dp.callback_query.middleware(AuthMiddleware())
+    
+    dp.message.middleware(AuthMiddleware(bot))
+    dp.callback_query.middleware(AuthMiddleware(bot))
+    
     dp.include_router(start_router)
     dp.include_router(savemode_router)
     dp.include_router(business_router)
+    
     return dp
 
 
@@ -69,12 +71,11 @@ async def main():
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
     
-    dp = await setup_dispatcher()
+    dp = await setup_dispatcher(bot)
     
     allowed_updates = list(Update.model_fields.keys())
     logger.info(f"📋 Поддерживаемые апдейты: {len(allowed_updates)} типов")
     
-    # ✅ ЗАПУСКАЕМ ПЛАНИРОВЩИК (очистка и бэкап)
     asyncio.create_task(scheduled_cleanup())
     logger.info("✅ Планировщик задач запущен")
     
