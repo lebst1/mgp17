@@ -42,14 +42,14 @@ async def get_main_menu(user, has_business):
     InlineKeyboardButton(
         text="📋 Скопировать юзернейм",
         copy_text=CopyTextButton(
-            text="@SafeSaverX_bot"
+            text="@laosllebot"
         )
     )
 ],
 [
     InlineKeyboardButton(
         text="✏️ Редактирование профиля",
-        url="https://t.me/SafeSaverX_bot"
+        url="https://t.me/laosllebot"
     )
 ],
     [
