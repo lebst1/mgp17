@@ -9,80 +9,255 @@ router = Router()
 
 @router.message(Command("start"))
 async def start_command(message: Message):
-    """Обработчик команды /start"""
     user = await UserRepository.get_by_id(message.from_user.id)
-    
     connections = await BusinessRepository.get_user_connections(message.from_user.id)
     has_business = len(connections) > 0
     
     welcome_text = f"""
-🌟 <b>Добро пожаловать в Mnemora!</b>
+🛡️ <b>Добро пожаловать в SafeSaverX!</b>
 
-Я ваш персональный ассистент для Telegram. Вот что я умею:
+Я — твой надёжный хранитель сообщений в Telegram. 
+Сохраняю удалённые и отредактированные сообщения, чтобы ты ничего не терял.
 
-📝 <b>SAVE MODE</b>
-Сохраняю удаленные и отредактированные сообщения, а также медиафайлы.
+━━━━━━━━━━━━━━━━━━━━━━
+<b>🔗 КАК ПОДКЛЮЧИТЬ БОТА</b>
 
-🤖 <b>AI Помощник</b>
-Делаю выжимки чатов (/summary), нахожу задачи (/todos), создаю напоминания (/remind).
+1️⃣ Нажми на кнопку <b>«Скопировать @username»</b> ниже
+2️⃣ Открой <b>Настройки</b> → <b>Редактирование профиля</b>
+3️⃣ Выбери <b>«Автоматизация действий»</b>
+4️⃣ Вставь скопированный @username бота
+5️⃣ <b>ВАЖНО!</b> Дай <b>ВСЕ</b> разрешения на работу с сообщениями
 
-⚡ <b>Dot команды</b>
-.mute - заглушить чат
-.info - информация о пользователе
-.repeat - повторить сообщение
+━━━━━━━━━━━━━━━━━━━━━━
+<b>✅ ЧТО УМЕЕТ БОТ</b>
 
-📌 <b>Быстрые команды:</b>
-/savemode on/off - включить/выключить сохранение
-/search текст - поиск по сохраненным сообщениям
-/help - все команды
+📩 <b>Уведомления об удалении</b>
+→ Когда собеседник удаляет сообщение
 
-<b>Ваш статус:</b>
-✅ Аккаунт активен
-✅ SAVE MODE: {'включен' if user.savemode_enabled else 'выключен'}
-✅ Business подключение: {'активно' if has_business else 'не подключено'}
+✏️ <b>Уведомления о правках</b>
+→ Когда собеседник редактирует сообщение
+
+📸 <b>Сохранение медиа</b>
+→ Сгорающие фото, голосовые, видео
+
+📊 <b>Твой статус:</b>
+🔹 Аккаунт: <b>активен</b>
+🔹 SAVE MODE: <b>{'включен ✅' if user.savemode_enabled else 'выключен ❌'}</b>
+🔹 Business: <b>{'подключен ✅' if has_business else 'не подключен ❌'}</b>
 """
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📖 Все команды", callback_data="show_help")],
-        [InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings")]
+        [
+            InlineKeyboardButton(
+                text="📋 Скопировать @username",
+                callback_data="copy_username"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="✏️ Редактирование профиля",
+                url="tg://settings"  # ✅ Открывает настройки Telegram
+            )
+        ],
+        [
+            InlineKeyboardButton(text="📖 Описание команд", callback_data="show_help"),
+            InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings")
+        ]
     ])
     
     await message.answer(welcome_text, reply_markup=keyboard, parse_mode="HTML")
 
 
+# ✅ КОПИРОВАНИЕ USERNAME
+@router.callback_query(lambda c: c.data == "copy_username")
+async def copy_username(callback):
+    await callback.answer(
+        text="✅ @SafeSaverX_bot скопирован!\n\n"
+             "Теперь перейди в Настройки → Редактирование профиля → "
+             "Автоматизация действий и вставь туда этот username.",
+        show_alert=True
+    )
+
+
+# ✅ ПОМОЩЬ / ОПИСАНИЕ КОМАНД
 @router.message(Command("help"))
 async def help_command(message: Message):
-    """Показать все команды"""
     help_text = """
-📚 <b>Все команды Mnemora</b>
+📚 <b>Все команды SafeSaverX</b>
 
-<b>📝 SAVE MODE:</b>
-/savemode on/off - включить/выключить сохранение
-/savemode_settings - настройки сохранения
-/deleted - последние удаленные сообщения
-/edits - последние правки
-/media - последние сохраненные медиа
-/search текст - поиск по базе
+<i>Основные команды:</i>
+/start — 🚀 Приветствие
+/help — 📖 Список команд
+/settings — ⚙️ Настройки
 
-<b>🤖 AI Функции:</b>
-/summary чат - выжимка последних сообщений
-/catchup чат - где вы остановились
-/todos - список задач
-/remind текст - создать напоминание
-/digest now - дайджест чатов
-/autoreply on/off - автоответчик
+<i>📝 SAVE MODE:</i>
+/savemode on — ✅ Включить сохранение
+/savemode off — ❌ Выключить сохранение
+/deleted — 🗑 Последние удалённые
+/search текст — 🔍 Поиск по базе
+/edits — ✏️ История правок
+/media — 🖼️ Сохранённые медиа
 
-<b>⚡ Dot команды (в чате):</b>
-.mute - заглушить чат
-.unmute - включить чат
-.info - информация о пользователе
-.type текст - отправить с typing
-.repeat n текст - повторить n раз
-.love - отправить анимацию
+<i>🤖 AI Функции:</i>
+/summary чат — 📋 Выжимка последних сообщений
+/todos — ✅ Список задач
+/remind текст — ⏰ Создать напоминание
+/digest now — 📰 Дайджест чатов
+/autoreply on/off — 🤖 Автоответчик
 
-<b>👤 Профиль:</b>
-/profile - ваш профиль
-/settings - настройки
-/business_status - статус бизнес-подключения
+<i>⚡ Dot команды:</i>
+<code>.mute</code> — 🔇 Заглушить чат
+<code>.unmute</code> — 🔊 Включить чат
+<code>.info</code> — ℹ️ Информация о пользователе
+<code>.repeat n текст</code> — 🔁 Повторить n раз
+<code>.love</code> — ❤️ Анимация
+
+<i>👤 Профиль:</i>
+/profile — 👤 Мой профиль
+/settings — ⚙️ Настройки
+/business_status — 📊 Статус бизнеса
 """
-    await message.answer(help_text, parse_mode="HTML")
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📋 Скопировать @username", callback_data="copy_username"),
+            InlineKeyboardButton(text="✏️ Редактирование профиля", url="tg://settings")
+        ],
+        [
+            InlineKeyboardButton(text="📊 Статус", callback_data="business_status"),
+            InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")
+        ]
+    ])
+    
+    await message.answer(help_text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@router.callback_query(lambda c: c.data == "show_help")
+async def show_help(callback):
+    await callback.answer()
+    await help_command(callback.message)
+
+
+# ✅ СТАТУС БИЗНЕСА
+@router.callback_query(lambda c: c.data == "business_status")
+async def show_business_status(callback):
+    await callback.answer()
+    from src.business_bot.handlers import business_status
+    await business_status(callback.message)
+
+
+# ✅ НАСТРОЙКИ
+@router.callback_query(lambda c: c.data == "settings")
+async def show_settings(callback):
+    await callback.answer()
+    settings_text = """
+⚙️ <b>Настройки SafeSaverX</b>
+
+🔹 <b>SAVE MODE</b> — сохранение удалённых сообщений
+🔹 <b>AI Assistant</b> — умные функции
+🔹 <b>Dot команды</b> — управление чатами
+
+<i>Используй команды для настройки:</i>
+/savemode on — ✅ включить SAVE MODE
+/savemode off — ❌ выключить SAVE MODE
+/autoreply on — 🤖 включить автоответ
+/autoreply off — 🤖 выключить автоответ
+"""
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📝 SAVE MODE", callback_data="savemode_settings"),
+            InlineKeyboardButton(text="🤖 Автоответчик", callback_data="autoreply_settings")
+        ],
+        [
+            InlineKeyboardButton(text="📋 Скопировать @username", callback_data="copy_username"),
+            InlineKeyboardButton(text="✏️ Редактирование профиля", url="tg://settings")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Назад", callback_data="show_help")
+        ]
+    ])
+    
+    await callback.message.edit_text(settings_text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@router.callback_query(lambda c: c.data == "back_to_start")
+async def back_to_start(callback):
+    await callback.answer()
+    await start_command(callback.message)
+
+
+@router.callback_query(lambda c: c.data == "help")
+async def help_callback(callback):
+    await callback.answer()
+    await help_command(callback.message)
+
+
+@router.callback_query(lambda c: c.data == "savemode_settings")
+async def savemode_settings(callback):
+    await callback.answer()
+    text = """
+📝 <b>SAVE MODE</b>
+
+Сохраняю удалённые и отредактированные сообщения.
+
+<b>Команды:</b>
+/savemode on — ✅ включить
+/savemode off — ❌ выключить
+/deleted — 🗑 последние удалённые
+/search текст — 🔍 поиск
+"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Включить", callback_data="savemode_on"),
+            InlineKeyboardButton(text="❌ Выключить", callback_data="savemode_off")
+        ],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="settings")]
+    ])
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@router.callback_query(lambda c: c.data == "autoreply_settings")
+async def autoreply_settings(callback):
+    await callback.answer()
+    text = """
+🤖 <b>Автоответчик</b>
+
+Автоматически отвечаю на сообщения.
+
+<b>Команды:</b>
+/autoreply on — 🤖 включить
+/autoreply off — 🤖 выключить
+"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🤖 Включить", callback_data="autoreply_on"),
+            InlineKeyboardButton(text="🤖 Выключить", callback_data="autoreply_off")
+        ],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="settings")]
+    ])
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+# ✅ ЗАГЛУШКИ ДЛЯ КНОПОК (пока просто уведомления)
+@router.callback_query(lambda c: c.data == "savemode_on")
+async def savemode_on(callback):
+    await callback.answer("✅ SAVE MODE включен! Используй /savemode on")
+
+
+@router.callback_query(lambda c: c.data == "savemode_off")
+async def savemode_off(callback):
+    await callback.answer("❌ SAVE MODE выключен! Используй /savemode off")
+
+
+@router.callback_query(lambda c: c.data == "autoreply_on")
+async def autoreply_on(callback):
+    await callback.answer("🤖 Автоответчик включен! Используй /autoreply on")
+
+
+@router.callback_query(lambda c: c.data == "autoreply_off")
+async def autoreply_off(callback):
+    await callback.answer("🤖 Автоответчик выключен! Используй /autoreply off")
