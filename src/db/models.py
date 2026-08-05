@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, BigInteger, Boolean, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, BigInteger, Boolean, DateTime, ForeignKey, Text, Index
 from sqlalchemy.orm import relationship
 from src.db.session import Base
 
@@ -57,6 +57,10 @@ class BusinessConnection(Base):
     
     user = relationship("User", back_populates="business_connections")
     
+    __table_args__ = (
+        Index('ix_business_connections_user_id', 'user_id'),
+    )
+    
     def __repr__(self):
         return f"<BusinessConnection {self.connection_id} for user {self.user_id}>"
 
@@ -82,7 +86,7 @@ class SavedMessage(Base):
     media_path = Column(String(500), nullable=True)
     media_size = Column(Integer, nullable=True)
     
-    is_deleted = Column(Boolean, default=False)
+    is_deleted = Column(Boolean, default=False, index=True)
     is_edited = Column(Boolean, default=False)
     edit_history = Column(Text, nullable=True)
     
@@ -90,6 +94,13 @@ class SavedMessage(Base):
     original_date = Column(DateTime, nullable=True)
     
     user = relationship("User", back_populates="saved_messages")
+    
+    __table_args__ = (
+        Index('ix_saved_messages_user_id', 'user_id'),
+        Index('ix_saved_messages_chat_id', 'chat_id'),
+        Index('ix_saved_messages_is_deleted', 'is_deleted'),
+        Index('ix_saved_messages_saved_at', 'saved_at'),
+    )
     
     def __repr__(self):
         return f"<SavedMessage {self.id} from chat {self.chat_id}>"
@@ -106,6 +117,11 @@ class Todo(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     
     user = relationship("User", back_populates="todos")
+    
+    __table_args__ = (
+        Index('ix_todos_user_id', 'user_id'),
+        Index('ix_todos_is_done', 'is_done'),
+    )
 
 
 class Reminder(Base):
@@ -119,6 +135,12 @@ class Reminder(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     
     user = relationship("User", back_populates="reminders")
+    
+    __table_args__ = (
+        Index('ix_reminders_user_id', 'user_id'),
+        Index('ix_reminders_remind_at', 'remind_at'),
+        Index('ix_reminders_is_done', 'is_done'),
+    )
 
 
 # Добавляем связи в User

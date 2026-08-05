@@ -1,6 +1,7 @@
 import logging
 import json
 import os
+import asyncio
 from aiogram import Router, F, Bot
 from aiogram.types import Message, BusinessConnection, BusinessMessagesDeleted, FSInputFile
 from aiogram.filters import Command
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 MEDIA_DIR = settings.MEDIA_DIR
+MAX_FILE_SIZE = settings.MAX_MEDIA_SIZE_MB * 1024 * 1024  # В байтах
 
 
 async def download_media(bot: Bot, file_id: str) -> str:
@@ -22,13 +24,21 @@ async def download_media(bot: Bot, file_id: str) -> str:
     try:
         os.makedirs(MEDIA_DIR, exist_ok=True)
         file = await bot.get_file(file_id)
+        
+        # Проверяем размер файла
+        if file.file_size and file.file_size > MAX_FILE_SIZE:
+            logger.warning(f"⚠️ Файл слишком большой ({file.file_size} байт), пропускаем")
+            return None
+        
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         ext = file.file_path.split('.')[-1] if '.' in file.file_path else 'bin'
         filename = f"{timestamp}_{file_id[:8]}.{ext}"
         file_path = os.path.join(MEDIA_DIR, filename)
+        
         await bot.download_file(file.file_path, file_path)
         logger.info(f"✅ Медиа сохранено: {file_path}")
         return file_path
+        
     except Exception as e:
         logger.error(f"❌ Ошибка скачивания медиа: {e}")
         return None
@@ -229,32 +239,56 @@ async def handle_business_message(message: Message):
             media_type = "photo"
             media_file_id = message.photo[-1].file_id
             media_size = message.photo[-1].file_size
-            media_path = await download_media(message.bot, media_file_id)
+            # ✅ Проверка размера
+            if media_size and media_size > MAX_FILE_SIZE:
+                logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
+            else:
+                media_path = await download_media(message.bot, media_file_id)
+                
         elif message.video:
             media_type = "video"
             media_file_id = message.video.file_id
             media_size = message.video.file_size
-            media_path = await download_media(message.bot, media_file_id)
+            if media_size and media_size > MAX_FILE_SIZE:
+                logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
+            else:
+                media_path = await download_media(message.bot, media_file_id)
+                
         elif message.document:
             media_type = "document"
             media_file_id = message.document.file_id
             media_size = message.document.file_size
-            media_path = await download_media(message.bot, media_file_id)
+            if media_size and media_size > MAX_FILE_SIZE:
+                logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
+            else:
+                media_path = await download_media(message.bot, media_file_id)
+                
         elif message.audio:
             media_type = "audio"
             media_file_id = message.audio.file_id
             media_size = message.audio.file_size
-            media_path = await download_media(message.bot, media_file_id)
+            if media_size and media_size > MAX_FILE_SIZE:
+                logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
+            else:
+                media_path = await download_media(message.bot, media_file_id)
+                
         elif message.voice:
             media_type = "voice"
             media_file_id = message.voice.file_id
             media_size = message.voice.file_size
-            media_path = await download_media(message.bot, media_file_id)
+            if media_size and media_size > MAX_FILE_SIZE:
+                logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
+            else:
+                media_path = await download_media(message.bot, media_file_id)
+                
         elif message.sticker:
             media_type = "sticker"
             media_file_id = message.sticker.file_id
             media_size = message.sticker.file_size
-            media_path = await download_media(message.bot, media_file_id)
+            if media_size and media_size > MAX_FILE_SIZE:
+                logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
+            else:
+                media_path = await download_media(message.bot, media_file_id)
         
         if media_path:
             message_data["media_path"] = media_path
@@ -368,7 +402,6 @@ async def handle_business_edited(message: Message):
 
 @router.message(Command("business_status"))
 async def business_status(message: Message):
-    # ✅ ПРОВЕРЯЕМ, ЕСТЬ ЛИ ПОЛЬЗОВАТЕЛЬ В БД
     user = await UserRepository.get_by_id(message.from_user.id)
     if not user:
         user = await UserRepository.get_or_create(

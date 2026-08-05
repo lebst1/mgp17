@@ -1,4 +1,6 @@
 import logging
+import os
+import time
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from sqlalchemy import inspect, text
@@ -13,7 +15,10 @@ Base = declarative_base()
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,
-    future=True
+    future=True,
+    pool_size=10,
+    max_overflow=20,
+    pool_recycle=3600
 )
 
 # Создаем фабрику сессий
@@ -35,16 +40,12 @@ async def init_db():
     logger.info("🔄 Проверка схемы базы данных...")
     
     async with engine.begin() as conn:
-        # Создаем таблицы, которых еще нет
         await conn.run_sync(Base.metadata.create_all)
         logger.info("✅ Таблицы созданы")
         
-        # Выполняем миграции через синхронную функцию
         def run_migrations(sync_conn):
-            """Синхронная функция для миграций"""
             inspector = inspect(sync_conn)
             
-            # Проверяем таблицу business_connections
             if "business_connections" in inspector.get_table_names():
                 columns = [col["name"] for col in inspector.get_columns("business_connections")]
                 
@@ -64,7 +65,6 @@ async def init_db():
                     sync_conn.execute(text("ALTER TABLE business_connections ADD COLUMN can_reply BOOLEAN"))
                     logger.info("✅ Добавлена колонка can_reply")
             
-            # Проверяем таблицу users
             if "users" in inspector.get_table_names():
                 columns = [col["name"] for col in inspector.get_columns("users")]
                 
@@ -76,7 +76,6 @@ async def init_db():
                     sync_conn.execute(text("ALTER TABLE users ADD COLUMN ai_requests INTEGER DEFAULT 0"))
                     logger.info("✅ Добавлена колонка ai_requests")
             
-            # Проверяем таблицу saved_messages
             if "saved_messages" in inspector.get_table_names():
                 columns = [col["name"] for col in inspector.get_columns("saved_messages")]
                 
@@ -104,7 +103,51 @@ async def init_db():
                         except Exception as e:
                             logger.warning(f"⚠️ Не удалось добавить {col_name}: {e}")
         
-        # Запускаем миграции
         await conn.run_sync(run_migrations)
     
     logger.info("✅ Миграция схемы завершена")
+    
+    # ✅ Запускаем автоочистку
+    await cleanup_old_data()
+
+
+async def cleanup_old_data():
+    """Очистка старых данных (записи и медиа-файлы старше 30 дней)"""
+    logger.info("🧹 Запуск очистки старых данных...")
+    
+    async with engine.begin() as conn:
+        # ✅ Удаляем записи старше 30 дней (которые не помечены как удаленные)
+        result = await conn.execute(
+            text("DELETE FROM saved_messages WHERE saved_at < datetime('now', '-30 days') AND is_deleted = 0")
+        )
+        deleted_count = result.rowcount
+        logger.info(f"✅ Удалено {deleted_count} старых записей из БД")
+        
+        # ✅ Очищаем медиа-файлы, которых нет в БД
+        media_dir = settings.MEDIA_DIR
+        if os.path.exists(media_dir):
+            # Получаем список всех файлов в БД
+            db_files = await conn.execute(
+                text("SELECT media_path FROM saved_messages WHERE media_path IS NOT NULL")
+            )
+            db_files_set = {row[0] for row in db_files.fetchall()}
+            
+            removed_count = 0
+            for filename in os.listdir(media_dir):
+                file_path = os.path.join(media_dir, filename)
+                if os.path.isfile(file_path):
+                    # Если файла нет в БД — удаляем
+                    if file_path not in db_files_set:
+                        try:
+                            os.remove(file_path)
+                            removed_count += 1
+                        except Exception as e:
+                            logger.warning(f"⚠️ Не удалось удалить {file_path}: {e}")
+            
+            logger.info(f"✅ Удалено {removed_count} старых медиа-файлов")
+        
+        # ✅ Сжимаем БД
+        await conn.execute(text("VACUUM"))
+        logger.info("✅ База данных сжата (VACUUM)")
+    
+    logger.info("✅ Очистка завершена")
