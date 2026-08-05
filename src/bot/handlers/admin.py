@@ -429,8 +429,9 @@ async def show_chats_list(target, user_id: int):
                 SavedMessage.chat_title,
                 func.count(SavedMessage.id).label('count'),
                 func.max(SavedMessage.saved_at).label('last_activity'),
-                func.sum(func.cast(SavedMessage.is_deleted, func.Integer())).label('deleted_count'),
-                func.sum(func.cast(SavedMessage.is_edited, func.Integer())).label('edited_count')
+                # ✅ ИСПРАВЛЕНО: используем case вместо cast
+                func.sum(func.case((SavedMessage.is_deleted == True, 1), else_=0)).label('deleted_count'),
+                func.sum(func.case((SavedMessage.is_edited == True, 1), else_=0)).label('edited_count')
             )
             .where(SavedMessage.user_id == user_id)
             .group_by(SavedMessage.chat_id, SavedMessage.chat_title)
@@ -620,9 +621,9 @@ async def admin_chat_stats(callback: CallbackQuery):
             select(
                 SavedMessage.chat_title,
                 func.count(SavedMessage.id).label('count'),
-                func.sum(func.cast(SavedMessage.is_deleted, func.Integer())).label('deleted'),
-                func.sum(func.cast(SavedMessage.is_edited, func.Integer())).label('edited'),
-                func.sum(func.cast(SavedMessage.media_path.isnot(None), func.Integer())).label('media')
+                func.sum(func.case((SavedMessage.is_deleted == True, 1), else_=0)).label('deleted'),
+                func.sum(func.case((SavedMessage.is_edited == True, 1), else_=0)).label('edited'),
+                func.sum(func.case((SavedMessage.media_path.isnot(None), 1), else_=0)).label('media')
             )
             .where(SavedMessage.user_id == user_id)
             .group_by(SavedMessage.chat_title)
