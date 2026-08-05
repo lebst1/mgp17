@@ -1,7 +1,8 @@
 import logging
 import json
+import os
 from aiogram import Router, F, Bot
-from aiogram.types import Message, BusinessConnection, BusinessMessagesDeleted
+from aiogram.types import Message, BusinessConnection, BusinessMessagesDeleted, FSInputFile
 from aiogram.filters import Command
 from datetime import datetime
 from src.db.repositories.user_repository import UserRepository
@@ -14,10 +15,36 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
+# Папка для сохранения медиа
+MEDIA_DIR = settings.MEDIA_DIR
+
+
+async def download_media(bot: Bot, file_id: str) -> str:
+    """Скачивает медиафайл и возвращает путь к нему"""
+    try:
+        os.makedirs(MEDIA_DIR, exist_ok=True)
+        
+        file = await bot.get_file(file_id)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ext = file.file_path.split('.')[-1] if '.' in file.file_path else 'bin'
+        filename = f"{timestamp}_{file_id[:8]}.{ext}"
+        file_path = os.path.join(MEDIA_DIR, filename)
+        
+        await bot.download_file(file.file_path, file_path)
+        
+        logger.info(f"✅ Медиа сохранено: {file_path}")
+        return file_path
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка скачивания медиа: {e}")
+        return None
+
 
 async def send_deleted_notification(bot: Bot, user_id: int, saved_msg):
-    """Отправляет красивое уведомление об удалении"""
+    """Отправляет красивое уведомление об удалении с медиа"""
     
+    # Формируем текстовую часть
     text = "🗑 <b>УДАЛЕНО СООБЩЕНИЕ</b>\n\n"
     
     if saved_msg.chat_title:
@@ -42,38 +69,83 @@ async def send_deleted_notification(bot: Bot, user_id: int, saved_msg):
     if saved_msg.text:
         text += f"📝 <b>Текст:</b>\n{saved_msg.text}\n\n"
     
-    if saved_msg.media_type:
-        media_emoji = {
-            "photo": "🖼️",
-            "video": "🎬",
-            "document": "📄",
-            "audio": "🎵",
-            "voice": "🎤",
-            "sticker": "🎨"
-        }
-        emoji = media_emoji.get(saved_msg.media_type, "📎")
-        text += f"{emoji} <b>Медиа:</b> {saved_msg.media_type}\n"
-        
-        if saved_msg.media_size:
-            size_kb = saved_msg.media_size / 1024
-            if size_kb > 1024:
-                text += f"   <b>Размер:</b> {size_kb/1024:.1f} МБ\n"
-            else:
-                text += f"   <b>Размер:</b> {size_kb:.1f} КБ\n"
+    # ✅ ОТПРАВЛЯЕМ МЕДИА + ТЕКСТ
+    media_path = saved_msg.media_path
     
-    if saved_msg.edit_history:
+    if media_path and os.path.exists(media_path):
         try:
-            history = json.loads(saved_msg.edit_history)
-            if history:
-                text += f"\n✏️ <b>Было отредактировано:</b> {len(history)} раз(а)\n"
-        except:
-            pass
-    
-    await bot.send_message(
-        chat_id=user_id,
-        text=text,
-        parse_mode="HTML"
-    )
+            media_file = FSInputFile(media_path)
+            
+            if saved_msg.media_type == "photo":
+                await bot.send_photo(
+                    chat_id=user_id,
+                    photo=media_file,
+                    caption=text,
+                    parse_mode="HTML"
+                )
+            elif saved_msg.media_type == "video":
+                await bot.send_video(
+                    chat_id=user_id,
+                    video=media_file,
+                    caption=text,
+                    parse_mode="HTML"
+                )
+            elif saved_msg.media_type == "document":
+                await bot.send_document(
+                    chat_id=user_id,
+                    document=media_file,
+                    caption=text,
+                    parse_mode="HTML"
+                )
+            elif saved_msg.media_type == "audio":
+                await bot.send_audio(
+                    chat_id=user_id,
+                    audio=media_file,
+                    caption=text,
+                    parse_mode="HTML"
+                )
+            elif saved_msg.media_type == "voice":
+                await bot.send_voice(
+                    chat_id=user_id,
+                    voice=media_file,
+                    caption=text,
+                    parse_mode="HTML"
+                )
+            elif saved_msg.media_type == "sticker":
+                await bot.send_sticker(
+                    chat_id=user_id,
+                    sticker=media_file
+                )
+                # Для стикеров отправляем текст отдельно
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=text,
+                    parse_mode="HTML"
+                )
+            else:
+                await bot.send_document(
+                    chat_id=user_id,
+                    document=media_file,
+                    caption=text,
+                    parse_mode="HTML"
+                )
+            
+            logger.info(f"✅ Медиа отправлено: {media_path}")
+            return
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка отправки медиа: {e}")
+            await bot.send_message(
+                chat_id=user_id,
+                text=text + "\n⚠️ <i>Медиафайл недоступен для отправки</i>",
+                parse_mode="HTML"
+            )
+    else:
+        await bot.send_message(
+            chat_id=user_id,
+            text=text,
+            parse_mode="HTML"
+        )
 
 
 @router.business_connection()
@@ -101,7 +173,7 @@ async def handle_business_connection(event: BusinessConnection, bot: Bot):
     try:
         await bot.send_message(
             chat_id=user_id,
-            text="✅ Ваш бизнес-аккаунт подключен к Mnemora!\n\n"
+            text="✅ Ваш бизнес-аккаунт подключен к SafeSaverX!\n\n"
                  "Теперь я буду сохранять удаленные и отредактированные сообщения.\n"
                  "Чтобы проверить статус, отправьте /business_status"
         )
@@ -156,24 +228,53 @@ async def handle_business_message(message: Message):
             "original_date": datetime.utcnow()
         }
         
+        # ✅ СОХРАНЯЕМ МЕДИА
+        media_path = None
+        media_file_id = None
+        media_type = None
+        media_size = None
+        
         if message.photo:
-            message_data["media_type"] = "photo"
-            message_data["media_file_id"] = message.photo[-1].file_id
+            media_type = "photo"
+            media_file_id = message.photo[-1].file_id
+            media_size = message.photo[-1].file_size
+            media_path = await download_media(message.bot, media_file_id)
+            
         elif message.video:
-            message_data["media_type"] = "video"
-            message_data["media_file_id"] = message.video.file_id
+            media_type = "video"
+            media_file_id = message.video.file_id
+            media_size = message.video.file_size
+            media_path = await download_media(message.bot, media_file_id)
+            
         elif message.document:
-            message_data["media_type"] = "document"
-            message_data["media_file_id"] = message.document.file_id
+            media_type = "document"
+            media_file_id = message.document.file_id
+            media_size = message.document.file_size
+            media_path = await download_media(message.bot, media_file_id)
+            
         elif message.audio:
-            message_data["media_type"] = "audio"
-            message_data["media_file_id"] = message.audio.file_id
+            media_type = "audio"
+            media_file_id = message.audio.file_id
+            media_size = message.audio.file_size
+            media_path = await download_media(message.bot, media_file_id)
+            
         elif message.voice:
-            message_data["media_type"] = "voice"
-            message_data["media_file_id"] = message.voice.file_id
+            media_type = "voice"
+            media_file_id = message.voice.file_id
+            media_size = message.voice.file_size
+            media_path = await download_media(message.bot, media_file_id)
+            
         elif message.sticker:
-            message_data["media_type"] = "sticker"
-            message_data["media_file_id"] = message.sticker.file_id
+            media_type = "sticker"
+            media_file_id = message.sticker.file_id
+            media_size = message.sticker.file_size
+            media_path = await download_media(message.bot, media_file_id)
+        
+        if media_path:
+            message_data["media_path"] = media_path
+            message_data["media_file_id"] = media_file_id
+            message_data["media_type"] = media_type
+            message_data["media_size"] = media_size
         
         await MessageRepository.save_message(message_data)
         logger.info(f"💾 Сохранено сообщение от {user.telegram_id} в чате {message.chat.id}")
@@ -184,7 +285,6 @@ async def handle_business_message(message: Message):
 
 @router.deleted_business_messages()
 async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
-    """Обработчик удаленных бизнес-сообщений"""
     logger.info(f"🔍 Получено удаление бизнес-сообщений!")
     logger.info(f"🔗 business_connection_id: {event.business_connection_id}")
     logger.info(f"📋 message_ids: {event.message_ids}")
@@ -210,7 +310,6 @@ async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
                     await session.commit()
                 logger.info(f"✅ Сообщение {message_id} отмечено как удаленное")
 
-                # ✅ ОТПРАВЛЯЕМ УВЕДОМЛЕНИЕ ТОЛЬКО ЕСЛИ СООБЩЕНИЕ НАПИСАЛ НЕ ВЛАДЕЛЕЦ
                 if saved_msg.from_user_id != owner.telegram_id:
                     await send_deleted_notification(bot, owner.telegram_id, saved_msg)
                     logger.info(f"✅ Уведомление отправлено владельцу {owner.telegram_id}")
