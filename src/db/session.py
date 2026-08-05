@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+import sqlite3
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from sqlalchemy import inspect, text
@@ -107,7 +108,7 @@ async def init_db():
     
     logger.info("✅ Миграция схемы завершена")
     
-    # ✅ Запускаем автоочистку
+    # Запускаем автоочистку (теперь с правильным VACUUM)
     await cleanup_old_data()
 
 
@@ -115,18 +116,17 @@ async def cleanup_old_data():
     """Очистка старых данных (записи и медиа-файлы старше 30 дней)"""
     logger.info("🧹 Запуск очистки старых данных...")
     
+    # 1️⃣ Удаляем старые записи в транзакции
     async with engine.begin() as conn:
-        # ✅ Удаляем записи старше 30 дней (которые не помечены как удаленные)
         result = await conn.execute(
             text("DELETE FROM saved_messages WHERE saved_at < datetime('now', '-30 days') AND is_deleted = 0")
         )
         deleted_count = result.rowcount
         logger.info(f"✅ Удалено {deleted_count} старых записей из БД")
         
-        # ✅ Очищаем медиа-файлы, которых нет в БД
+        # 2️⃣ Очищаем медиа-файлы
         media_dir = settings.MEDIA_DIR
         if os.path.exists(media_dir):
-            # Получаем список всех файлов в БД
             db_files = await conn.execute(
                 text("SELECT media_path FROM saved_messages WHERE media_path IS NOT NULL")
             )
@@ -136,7 +136,6 @@ async def cleanup_old_data():
             for filename in os.listdir(media_dir):
                 file_path = os.path.join(media_dir, filename)
                 if os.path.isfile(file_path):
-                    # Если файла нет в БД — удаляем
                     if file_path not in db_files_set:
                         try:
                             os.remove(file_path)
@@ -145,9 +144,20 @@ async def cleanup_old_data():
                             logger.warning(f"⚠️ Не удалось удалить {file_path}: {e}")
             
             logger.info(f"✅ Удалено {removed_count} старых медиа-файлов")
+    
+    # 3️⃣ ✅ ВЫПОЛНЯЕМ VACUUM ВНЕ ТРАНЗАКЦИИ
+    try:
+        # Закрываем все соединения из пула
+        await engine.dispose()
         
-        # ✅ Сжимаем БД
-        await conn.execute(text("VACUUM"))
+        # Подключаемся к SQLite синхронно
+        db_path = settings.DATABASE_URL.replace("sqlite+aiosqlite:///", "")
+        sync_conn = sqlite3.connect(db_path)
+        sync_conn.execute("VACUUM")
+        sync_conn.close()
+        
         logger.info("✅ База данных сжата (VACUUM)")
+    except Exception as e:
+        logger.error(f"❌ Ошибка при выполнении VACUUM: {e}")
     
     logger.info("✅ Очистка завершена")
