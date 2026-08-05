@@ -39,19 +39,19 @@ async def get_main_menu(user, has_business):
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
     [
-        InlineKeyboardButton(
-            text="📋 Скопировать юзернейм",
-            copy_text=CopyTextButton(
-                text="@SafeSaverX_bot"
-            )
+    InlineKeyboardButton(
+        text="📋 Скопировать юзернейм",
+        copy_text=CopyTextButton(
+            text="@SafeSaverX_bot"
         )
-    ],
-    [
-        InlineKeyboardButton(
-            text="✏️ Редактирование профиля",
-            callback_data="edit_profile"
-        )
-    ],
+    )
+],
+[
+    InlineKeyboardButton(
+        text="✏️ Редактирование профиля",
+        url="https://t.me/SafeSaverX_bot"
+    )
+],
     [
         InlineKeyboardButton(
             text="❓ Описание команд",
@@ -109,26 +109,26 @@ async def start_command(message: Message):
 
 
 
-# ✅ РЕДАКТИРОВАНИЕ ПРОФИЛЯ
-@router.callback_query(lambda c: c.data == "edit_profile")
-async def edit_profile(callback: CallbackQuery):
-    await callback.answer()
+# # ✅ РЕДАКТИРОВАНИЕ ПРОФИЛЯ
+# @router.callback_query(lambda c: c.data == "edit_profile")
+# async def edit_profile(callback: CallbackQuery):
+#     await callback.answer()
 
-    await callback.message.answer(
-        """
-<b>📌 Как подключить SafeSaverX</b>
+#     await callback.message.answer(
+#         """
+# <b>📌 Как подключить SafeSaverX</b>
 
-1. Открой Telegram
-2. Настройки
-3. Редактирование профиля
-4. Автоматизация действий
-5. Добавь <code>@SafeSaverX_bot</code>
-6. Выдай все разрешения
+# 1. Открой Telegram
+# 2. Настройки
+# 3. Редактирование профиля
+# 4. Автоматизация действий
+# 5. Добавь <code>@SafeSaverX_bot</code>
+# 6. Выдай все разрешения
 
-После подключения бот начнёт сохранять сообщения.
-""",
-        parse_mode="HTML"
-    )
+# После подключения бот начнёт сохранять сообщения.
+# """,
+#         parse_mode="HTML"
+#     )
 
 
 # ✅ ОПИСАНИЕ КОМАНД
