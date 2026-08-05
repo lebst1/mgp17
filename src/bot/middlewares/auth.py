@@ -2,6 +2,7 @@ from typing import Callable, Dict, Any, Awaitable
 from aiogram import BaseMiddleware, Bot
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from src.db.repositories.user_repository import UserRepository
+from src.db.repositories.subscription_repository import SubscriptionRepository
 from src.config import settings
 import logging
 
@@ -9,12 +10,12 @@ logger = logging.getLogger(__name__)
 
 
 class AuthMiddleware(BaseMiddleware):
-    """Middleware для проверки подписки"""
-
+    """Middleware для проверки авторизации и подписки"""
+    
     def __init__(self, bot: Bot):
         self.bot = bot
         super().__init__()
-
+    
     async def __call__(
         self,
         handler: Callable[[Message, Dict[str, Any]], Awaitable[Any]],
@@ -23,49 +24,55 @@ class AuthMiddleware(BaseMiddleware):
     ) -> Any:
         if not hasattr(event, 'from_user') or not event.from_user:
             return await handler(event, data)
-
+        
         user_id = event.from_user.id
-
+        
         if not await UserRepository.check_access(user_id):
             await event.answer("⛔ У вас нет доступа к этому боту.")
             return
-
-        if settings.REQUIRED_CHANNEL_ID and settings.REQUIRED_CHANNEL_URL:
-            try:
-                member = await self.bot.get_chat_member(
-                    chat_id=settings.REQUIRED_CHANNEL_ID,
-                    user_id=user_id
+        
+        # ✅ ПРОВЕРКА ПОДПИСКИ
+        subscription = await SubscriptionRepository.get_active_subscription(user_id)
+        if not subscription:
+            subscription = await SubscriptionRepository.get_or_create_subscription(user_id)
+            
+            if subscription.trial_used:
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="💳 Купить подписку 99₽",
+                            callback_data="subscribe_buy"
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text="👥 Привести друга (+5 дней)",
+                            callback_data="subscribe_referral"
+                        )
+                    ]
+                ])
+                
+                await event.answer(
+                    "⏰ <b>Ваша подписка истекла!</b>\n\n"
+                    "Чтобы продолжить пользоваться ботом:\n"
+                    "• Купи подписку за 99₽/месяц\n"
+                    "• Приведи друга и получи +5 дней бесплатно\n\n"
+                    "У тебя уже был пробный день.",
+                    reply_markup=keyboard,
+                    parse_mode="HTML"
                 )
-
-                if member.status in ['left', 'kicked']:
-                    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                        [
-                            InlineKeyboardButton(
-                                text="📢 Подписаться на канал",
-                                url=settings.REQUIRED_CHANNEL_URL
-                            )
-                        ],
-                        [
-                            InlineKeyboardButton(
-                                text="🔄 Проверить подписку",
-                                callback_data="check_subscription"
-                            )
-                        ]
-                    ])
-
-                    await event.answer(
-                        f"📢 <b>Подпишитесь на наш канал!</b>\n\n"
-                        f"Для использования бота необходимо подписаться на канал:\n"
-                        f"<a href='{settings.REQUIRED_CHANNEL_URL}'>{settings.REQUIRED_CHANNEL_URL}</a>\n\n"
-                        f"После подписки нажмите «Проверить подписку».",
-                        reply_markup=keyboard,
-                        parse_mode="HTML"
-                    )
-                    return
-
-            except Exception as e:
-                logger.error(f"❌ Ошибка проверки подписки: {e}")
-
+                return
+            else:
+                await event.answer(
+                    "🎁 <b>Добро пожаловать!</b>\n\n"
+                    "Ты получил <b>1 день бесплатного</b> использования!\n"
+                    "Наслаждайся всеми функциями бота.\n\n"
+                    "После окончания пробного периода ты сможешь:\n"
+                    "• Купить подписку за 99₽/месяц\n"
+                    "• Привести друга и получить +5 дней бесплатно",
+                    parse_mode="HTML"
+                )
+        
         try:
             user = await UserRepository.get_or_create(
                 telegram_id=user_id,
@@ -76,5 +83,5 @@ class AuthMiddleware(BaseMiddleware):
             data['user'] = user
         except Exception as e:
             logger.error(f"Error creating user: {e}")
-
+        
         return await handler(event, data)

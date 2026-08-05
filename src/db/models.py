@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import Column, Integer, String, BigInteger, Boolean, DateTime, ForeignKey, Text, Index
 from sqlalchemy.orm import relationship
 from src.db.session import Base
@@ -31,10 +31,14 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    # Связи
     saved_messages = relationship("SavedMessage", back_populates="user")
     todos = relationship("Todo", back_populates="user")
     reminders = relationship("Reminder", back_populates="user")
     business_connections = relationship("BusinessConnection", back_populates="user")
+    subscription = relationship("Subscription", back_populates="user", uselist=False)
+    referrals_given = relationship("Referral", foreign_keys="Referral.referrer_id", back_populates="referrer")
+    referrals_received = relationship("Referral", foreign_keys="Referral.referred_id", back_populates="referred")
     
     def __repr__(self):
         return f"<User {self.telegram_id} ({self.username or self.first_name})>"
@@ -143,8 +147,60 @@ class Reminder(Base):
     )
 
 
+class Subscription(Base):
+    """Модель подписки пользователя"""
+    __tablename__ = "subscriptions"
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False, unique=True, index=True)
+    
+    subscription_type = Column(String(50), default="trial")
+    
+    starts_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    trial_used = Column(Boolean, default=False)
+    
+    is_active = Column(Boolean, default=True)
+    auto_renew = Column(Boolean, default=False)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    user = relationship("User", back_populates="subscription")
+    
+    __table_args__ = (
+        Index('ix_subscriptions_user_id', 'user_id'),
+        Index('ix_subscriptions_expires_at', 'expires_at'),
+        Index('ix_subscriptions_is_active', 'is_active'),
+    )
+
+
+class Referral(Base):
+    """Модель рефералов"""
+    __tablename__ = "referrals"
+    
+    id = Column(Integer, primary_key=True)
+    referrer_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False, index=True)
+    referred_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False, unique=True, index=True)
+    
+    days_awarded = Column(Integer, default=5)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    referrer = relationship("User", foreign_keys=[referrer_id], back_populates="referrals_given")
+    referred = relationship("User", foreign_keys=[referred_id], back_populates="referrals_received")
+    
+    __table_args__ = (
+        Index('ix_referrals_referrer_id', 'referrer_id'),
+        Index('ix_referrals_referred_id', 'referred_id'),
+    )
+
+
 # Добавляем связи в User
 User.saved_messages = relationship("SavedMessage", back_populates="user")
 User.todos = relationship("Todo", back_populates="user")
 User.reminders = relationship("Reminder", back_populates="user")
 User.business_connections = relationship("BusinessConnection", back_populates="user")
+User.subscription = relationship("Subscription", back_populates="user", uselist=False)
+User.referrals_given = relationship("Referral", foreign_keys=[Referral.referrer_id], back_populates="referrer")
+User.referrals_received = relationship("Referral", foreign_keys=[Referral.referred_id], back_populates="referred")

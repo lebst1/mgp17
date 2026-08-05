@@ -10,6 +10,7 @@ from aiogram.types import (
 from aiogram.filters import Command
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.business_repository import BusinessRepository
+from src.db.repositories.subscription_repository import SubscriptionRepository
 from src.config import settings
 import os
 import logging
@@ -72,28 +73,26 @@ async def get_main_menu(user, has_business):
 👤 <b>Профиль</b>
 ▸ Статус: <b>{'активен' if user.is_active else 'неактивен'}</b>
 ▸ SAVE MODE: <b>{'включен' if user.savemode_enabled else 'выключен'}</b>
+▸ Business: <b>{'подключен' if has_business else 'не подключен'}</b>
 
 📌 <b>Как подключить бота:</b>
 1. Нажми «📋 Скопировать юзернейм»
 2. Открой Настройки Telegram → Редактирование профиля
 3. Выбери «Автоматизация действий»
 4. Вставь скопированный юзернейм
-5. Дай разрешения на сообщения!
+5. Дай все разрешения на сообщения!
 
 <b>Что умеет бот:</b>
 • Присылает уведомления, когда собеседник удаляет сообщение
 • Присылает уведомления, когда собеседник редактирует сообщение
-• Сохраняет фото, голосовые и видео
+• Сохраняет сгорающие фото, голосовые и видео
 """
     
-    keyboard = InlineKeyboardMarkup(
-    inline_keyboard=[
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
                 text="📋 Скопировать юзернейм",
-                copy_text=CopyTextButton(
-                    text="@laosllebot"
-                )
+                copy_text=CopyTextButton(text="@laosllebot")
             )
         ],
         [
@@ -117,9 +116,15 @@ async def get_main_menu(user, has_business):
                 text="⚙️ Настройки",
                 callback_data="settings"
             )
+        ],
+        [
+            InlineKeyboardButton(
+                text="💳 Подписка",
+                callback_data="subscribe_info"
+            )
         ]
-    ]
-)
+    ])
+    
     if settings.REQUIRED_CHANNEL_URL:
         keyboard.inline_keyboard.append([
             InlineKeyboardButton(text="📢 Наш канал", url=settings.REQUIRED_CHANNEL_URL)
@@ -146,14 +151,40 @@ async def send_main_menu(target, user, has_business):
 
 @router.message(Command("start"))
 async def start_command(message: Message):
-    user = await UserRepository.get_by_id(message.from_user.id)
-    if not user:
-        user = await UserRepository.get_or_create(
-            telegram_id=message.from_user.id,
-            username=message.from_user.username,
-            first_name=message.from_user.first_name,
-            last_name=message.from_user.last_name
+    # ✅ ПРОВЕРЯЕМ РЕФЕРАЛЬНУЮ ССЫЛКУ
+    args = message.text.split()
+    referrer_id = None
+    
+    if len(args) > 1 and args[1].startswith("ref_"):
+        try:
+            referrer_id = int(args[1].replace("ref_", ""))
+        except ValueError:
+            pass
+    
+    # Создаем пользователя
+    user = await UserRepository.get_or_create(
+        telegram_id=message.from_user.id,
+        username=message.from_user.username,
+        first_name=message.from_user.first_name,
+        last_name=message.from_user.last_name
+    )
+    
+    # ✅ Если есть реферер — активируем рефералку
+    if referrer_id and referrer_id != message.from_user.id:
+        success = await SubscriptionRepository.activate_referral(
+            referrer_id=referrer_id,
+            referred_id=message.from_user.id
         )
+        if success:
+            await message.answer(
+                "🎉 <b>Реферал активирован!</b>\n\n"
+                "Твой друг получил +5 дней подписки!\n"
+                "А ты тоже получаешь 1 день бесплатно!",
+                parse_mode="HTML"
+            )
+    
+    # Создаем подписку
+    subscription = await SubscriptionRepository.get_or_create_subscription(message.from_user.id)
     
     connections = await BusinessRepository.get_user_connections(message.from_user.id)
     has_business = len(connections) > 0
@@ -187,6 +218,8 @@ async def show_help(callback: CallbackQuery):
 /settings — Настройки
 /savemode on — Включить SAVE MODE
 /savemode off — Выключить SAVE MODE
+/subscribe — Информация о подписке
+/referral — Реферальная ссылка
 """
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")]
@@ -316,3 +349,10 @@ async def help_command(message: Message):
 @router.message(Command("settings"))
 async def settings_command(message: Message):
     await show_settings(message)
+
+
+@router.callback_query(lambda c: c.data == "subscribe_info")
+async def subscribe_info_callback(callback: CallbackQuery):
+    await callback.answer()
+    from .subscription import subscribe_info
+    await subscribe_info(callback.message)
