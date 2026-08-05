@@ -92,3 +92,20 @@ class MessageRepository:
                 )
             )
             return result.scalar_one_or_none()
+    
+    # ✅ НОВЫЙ МЕТОД ДЛЯ ПОИСКА ПО ID И ЧАТУ
+    @staticmethod
+    async def get_by_id_and_chat(message_id: int, chat_id: int, user_id: int) -> Optional[SavedMessage]:
+        """Получить сообщение по ID, чату и пользователю"""
+        async with async_session() as session:
+            result = await session.execute(
+                select(SavedMessage)
+                .where(
+                    and_(
+                        SavedMessage.message_id == message_id,
+                        SavedMessage.chat_id == chat_id,
+                        SavedMessage.user_id == user_id
+                    )
+                )
+            )
+            return result.scalar_one_or_none()

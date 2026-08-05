@@ -15,6 +15,76 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
+# ✅ ФУНКЦИЯ ДЛЯ ОТПРАВКИ КРАСИВОГО УВЕДОМЛЕНИЯ
+async def send_deleted_notification(bot: Bot, user_id: int, saved_msg):
+    """Отправляет красивое уведомление об удалении"""
+    
+    # Формируем сообщение
+    text = "🗑 <b>УДАЛЕНО СООБЩЕНИЕ</b>\n\n"
+    
+    # Чат
+    if saved_msg.chat_title:
+        text += f"📌 <b>Чат:</b> {saved_msg.chat_title}\n"
+    else:
+        text += f"📌 <b>Чат:</b> {saved_msg.chat_id}\n"
+    
+    # От кого
+    if saved_msg.from_username:
+        text += f"👤 <b>От:</b> @{saved_msg.from_username}\n"
+    elif saved_msg.from_first_name:
+        text += f"👤 <b>От:</b> {saved_msg.from_first_name}\n"
+    else:
+        text += f"👤 <b>От:</b> {saved_msg.from_user_id}\n"
+    
+    # Дата
+    if saved_msg.original_date:
+        text += f"🕐 <b>Отправлено:</b> {saved_msg.original_date.strftime('%d.%m.%Y %H:%M:%S')}\n"
+    else:
+        text += f"🕐 <b>Отправлено:</b> {saved_msg.saved_at.strftime('%d.%m.%Y %H:%M:%S')}\n"
+    
+    text += f"🕐 <b>Удалено:</b> {datetime.utcnow().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
+    
+    # Текст сообщения
+    if saved_msg.text:
+        text += f"📝 <b>Текст:</b>\n{saved_msg.text}\n\n"
+    
+    # Медиа
+    if saved_msg.media_type:
+        media_emoji = {
+            "photo": "🖼️",
+            "video": "🎬",
+            "document": "📄",
+            "audio": "🎵",
+            "voice": "🎤",
+            "sticker": "🎨"
+        }
+        emoji = media_emoji.get(saved_msg.media_type, "📎")
+        text += f"{emoji} <b>Медиа:</b> {saved_msg.media_type}\n"
+        
+        if saved_msg.media_size:
+            size_kb = saved_msg.media_size / 1024
+            if size_kb > 1024:
+                text += f"   <b>Размер:</b> {size_kb/1024:.1f} МБ\n"
+            else:
+                text += f"   <b>Размер:</b> {size_kb:.1f} КБ\n"
+    
+    # Если была история правок
+    if saved_msg.edit_history:
+        try:
+            history = json.loads(saved_msg.edit_history)
+            if history:
+                text += f"\n✏️ <b>Было отредактировано:</b> {len(history)} раз(а)\n"
+        except:
+            pass
+    
+    # Отправляем
+    await bot.send_message(
+        chat_id=user_id,
+        text=text,
+        parse_mode="HTML"
+    )
+
+
 @router.business_connection()
 async def handle_business_connection(event: BusinessConnection, bot: Bot):
     user_id = event.user.id
@@ -121,7 +191,6 @@ async def handle_business_message(message: Message):
         logger.error(f"❌ Ошибка сохранения сообщения: {e}")
 
 
-# ✅ ПРАВИЛЬНЫЙ ОБРАБОТЧИК УДАЛЕННЫХ СООБЩЕНИЙ (через обсервер)
 @router.deleted_business_messages()
 async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
     """Обработчик удаленных бизнес-сообщений"""
@@ -130,31 +199,37 @@ async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
     logger.info(f"📋 message_ids: {event.message_ids}")
     logger.info(f"📌 chat_id: {event.chat.id}")
 
+    # Получаем пользователя по connection_id
     user = await BusinessRepository.get_user_by_connection(event.business_connection_id)
     if not user:
         logger.warning(f"⚠️ Пользователь не найден для connection_id: {event.business_connection_id}")
         return
 
+    # Проходим по всем удаленным сообщениям
     for message_id in event.message_ids:
         try:
-            await MessageRepository.mark_as_deleted(
+            # Ищем сообщение в БД по chat_id и message_id
+            saved_msg = await MessageRepository.get_by_id_and_chat(
                 message_id=message_id,
                 chat_id=event.chat.id,
                 user_id=user.telegram_id
             )
-            logger.info(f"✅ Сообщение {message_id} отмечено как удаленное")
+            
+            if saved_msg:
+                # Помечаем как удаленное
+                saved_msg.is_deleted = True
+                async with async_session() as session:
+                    await session.merge(saved_msg)
+                    await session.commit()
+                logger.info(f"✅ Сообщение {message_id} отмечено как удаленное")
+
+                # Отправляем уведомление ТОЛЬКО ВЛАДЕЛЬЦУ
+                await send_deleted_notification(bot, user.telegram_id, saved_msg)
+            else:
+                logger.warning(f"⚠️ Сообщение {message_id} не найдено в БД")
+                
         except Exception as e:
             logger.error(f"❌ Ошибка обработки удаления: {e}")
-
-    try:
-        await bot.send_message(
-            chat_id=user.telegram_id,
-            text=f"🗑 Удалено {len(event.message_ids)} сообщений в чате {event.chat.id}",
-            parse_mode="HTML"
-        )
-        logger.info(f"✅ Уведомление об удалении отправлено пользователю {user.telegram_id}")
-    except Exception as e:
-        logger.error(f"❌ Ошибка отправки уведомления: {e}")
 
 
 @router.business_message()
