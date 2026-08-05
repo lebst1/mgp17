@@ -1,5 +1,5 @@
 from aiogram import Router, Bot, F
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -8,15 +8,21 @@ from src.db.repositories.message_repository import MessageRepository
 from src.db.repositories.business_repository import BusinessRepository
 from src.db.session import async_session, cleanup_old_data
 from src.config import settings
-from sqlalchemy import select, func, or_
-from src.db.models import User, SavedMessage, BusinessConnection  # ✅ ДОБАВИЛИ BusinessConnection
+from sqlalchemy import select, func, or_, and_, desc
+from src.db.models import User, SavedMessage, BusinessConnection
 import os
 import logging
 import time
+import shutil
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+# ✅ ЛИМИТЫ
+MAX_MEDIA_FILES = 50  # Максимум медиа в БД
+MAX_MEDIA_AGE_DAYS = 1  # Хранить медиа 1
 
 
 # ✅ СОСТОЯНИЯ ДЛЯ FSM
@@ -25,6 +31,7 @@ class AdminStates(StatesGroup):
     waiting_for_user_id = State()
     waiting_for_search = State()
     waiting_for_user_messages = State()
+    waiting_for_view_media = State()
 
 
 # ✅ ПРОВЕРКА АДМИНА
@@ -112,7 +119,19 @@ async def admin_stats(callback: CallbackQuery):
         edited_count = await session.scalar(
             select(func.count()).select_from(SavedMessage).where(SavedMessage.is_edited == True)
         )
+        media_count = await session.scalar(
+            select(func.count()).select_from(SavedMessage).where(SavedMessage.media_path.isnot(None))
+        )
         connections_count = await session.scalar(select(func.count()).select_from(BusinessConnection))
+    
+    media_dir_size = 0
+    media_files = 0
+    if os.path.exists(settings.MEDIA_DIR):
+        media_files = len(os.listdir(settings.MEDIA_DIR))
+        for f in os.listdir(settings.MEDIA_DIR):
+            f_path = os.path.join(settings.MEDIA_DIR, f)
+            if os.path.isfile(f_path):
+                media_dir_size += os.path.getsize(f_path)
     
     text = f"""
 📊 <b>Статистика SafeSaverX</b>
@@ -121,8 +140,9 @@ async def admin_stats(callback: CallbackQuery):
 📝 <b>Всего сообщений:</b> {messages_count or 0}
 🗑️ <b>Удалено:</b> {deleted_count or 0}
 ✏️ <b>Отредактировано:</b> {edited_count or 0}
+🖼️ <b>Медиа в БД:</b> {media_count or 0}
+💾 <b>Медиа на диске:</b> {media_files} ({media_dir_size / 1024 / 1024:.1f} МБ)
 🔗 <b>Бизнес-подключений:</b> {connections_count or 0}
-💾 <b>Медиа на диске:</b> {len(os.listdir(settings.MEDIA_DIR)) if os.path.exists(settings.MEDIA_DIR) else 0}
 """
     
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -280,8 +300,9 @@ async def admin_view_user_messages(callback: CallbackQuery, state: FSMContext):
         "Отправь:\n"
         "• <code>deleted</code> — показать удаленные сообщения\n"
         "• <code>edited</code> — показать отредактированные сообщения\n"
+        "• <code>media</code> — показать сообщения с медиа\n"
         "• <code>all</code> — показать все сообщения\n\n"
-        "Или отправь количество сообщений (например, 10) чтобы показать последние N сообщений.\n\n"
+        "Или отправь количество сообщений (например, 10).\n\n"
         "Отправь /cancel чтобы отменить.",
         parse_mode="HTML"
     )
@@ -310,6 +331,9 @@ async def process_user_messages(message: Message, state: FSMContext):
         elif query == "edited":
             stmt = stmt.where(SavedMessage.is_edited == True)
             title = "✏️ Отредактированные сообщения"
+        elif query == "media":
+            stmt = stmt.where(SavedMessage.media_path.isnot(None))
+            title = "🖼️ Сообщения с медиа"
         elif query == "all":
             title = "📝 Все сообщения"
         elif query.isdigit():
@@ -317,10 +341,10 @@ async def process_user_messages(message: Message, state: FSMContext):
             stmt = stmt.order_by(SavedMessage.saved_at.desc()).limit(limit)
             title = f"📝 Последние {limit} сообщений"
         else:
-            await message.answer("❌ Неверный запрос. Используй: deleted, edited, all или число.")
+            await message.answer("❌ Неверный запрос. Используй: deleted, edited, media, all или число.")
             return
         
-        if query in ["deleted", "edited", "all"]:
+        if query in ["deleted", "edited", "media", "all"]:
             stmt = stmt.order_by(SavedMessage.saved_at.desc()).limit(20)
         
         messages = await session.scalars(stmt)
@@ -331,42 +355,114 @@ async def process_user_messages(message: Message, state: FSMContext):
         await state.clear()
         return
     
-    text = f"<b>{title}</b>\n\n"
-    count = 0
     for msg in messages:
-        count += 1
-        text += f"<b>{count}.</b> ID: {msg.message_id}\n"
-        text += f"📌 Чат: {msg.chat_title or msg.chat_id}\n"
-        if msg.from_username:
-            text += f"👤 От: @{msg.from_username}\n"
-        text += f"📝 Текст: {msg.text[:100] + '...' if msg.text and len(msg.text) > 100 else msg.text or 'Нет текста'}\n"
-        if msg.media_type:
-            text += f"🖼️ Медиа: {msg.media_type}\n"
-        text += f"🕐 {msg.saved_at.strftime('%d.%m.%Y %H:%M:%S')}\n"
-        if msg.is_deleted:
-            text += f"🗑️ Удалено\n"
-        if msg.is_edited:
-            text += f"✏️ Отредактировано\n"
-        text += "➖➖➖➖➖➖➖➖➖\n"
+        # Формируем текст для каждого сообщения
+        text = f"""
+<b>ID:</b> {msg.message_id}
+📌 <b>Чат:</b> {msg.chat_title or msg.chat_id}
+👤 <b>От:</b> @{msg.from_username or 'неизвестно'}
+🕐 <b>Время:</b> {msg.saved_at.strftime('%d.%m.%Y %H:%M:%S')}
+📝 <b>Текст:</b> {msg.text[:200] + '...' if msg.text and len(msg.text) > 200 else msg.text or 'Нет текста'}
+{'🗑️ Удалено' if msg.is_deleted else ''}
+{'✏️ Отредактировано' if msg.is_edited else ''}
+{'🖼️ Медиа: ' + msg.media_type if msg.media_type else ''}
+"""
         
-        if len(text) > 3800:
-            break
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🖼️ Показать медиа",
+                    callback_data=f"admin_show_media_{msg.id}"
+                )
+            ]
+        ]) if msg.media_path and os.path.exists(msg.media_path) else None
+        
+        if keyboard:
+            await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+        else:
+            await message.answer(text, parse_mode="HTML")
     
-    if len(messages) > count:
-        text += f"\n... и еще {len(messages) - count} сообщений"
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🔙 Назад к пользователю", callback_data=f"admin_back_to_user_{user_id}")
-        ],
-        [
-            InlineKeyboardButton(text="🔙 В админ панель", callback_data="admin_back")
-        ]
-    ])
-    
-    await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
     await state.clear()
 
+
+# ✅ ПОКАЗАТЬ МЕДИА
+@router.callback_query(lambda c: c.data.startswith("admin_show_media_"))
+async def admin_show_media(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    msg_id = int(callback.data.split("_")[-1])
+    
+    async with async_session() as session:
+        msg = await session.scalar(select(SavedMessage).where(SavedMessage.id == msg_id))
+        
+        if not msg or not msg.media_path or not os.path.exists(msg.media_path):
+            await callback.answer("❌ Медиа не найдено", show_alert=True)
+            return
+        
+        try:
+            media_file = FSInputFile(msg.media_path)
+            
+            if msg.media_type == "photo":
+                await callback.message.answer_photo(photo=media_file)
+            elif msg.media_type == "video":
+                await callback.message.answer_video(video=media_file)
+            elif msg.media_type in ["document", "file"]:
+                await callback.message.answer_document(document=media_file)
+            elif msg.media_type == "audio":
+                await callback.message.answer_audio(audio=media_file)
+            elif msg.media_type == "voice":
+                await callback.message.answer_voice(voice=media_file)
+            else:
+                await callback.message.answer_document(document=media_file)
+            
+            # ✅ ОБНОВЛЯЕМ ВРЕМЯ ПОСЛЕДНЕГО ПРОСМОТРА
+            # (чтобы не удалять недавно просмотренные)
+            
+        except Exception as e:
+            await callback.answer(f"❌ Ошибка: {e}", show_alert=True)
+    
+    await callback.answer()
+
+
+# ✅ ОЧИСТКА СТАРЫХ МЕДИА
+async def cleanup_old_media():
+    """Удаляет медиа старше 1 дня"""
+    try:
+        async with async_session() as session:
+            # Удаляем медиа старше 1 дня
+            cutoff_date = datetime.utcnow() - timedelta(days=MAX_MEDIA_AGE_DAYS)
+            
+            media = await session.scalars(
+                select(SavedMessage)
+                .where(
+                    SavedMessage.media_path.isnot(None),
+                    SavedMessage.saved_at < cutoff_date
+                )
+            )
+            
+            deleted_count = 0
+            for msg in media:
+                if msg.media_path and os.path.exists(msg.media_path):
+                    try:
+                        os.remove(msg.media_path)
+                        logger.info(f"🗑️ Удалён старый медиа-файл: {msg.media_path}")
+                    except Exception as e:
+                        logger.error(f"Ошибка удаления медиа: {e}")
+                
+                msg.media_path = None
+                msg.media_type = None
+                msg.media_file_id = None
+                msg.media_size = None
+                await session.merge(msg)
+                deleted_count += 1
+            
+            await session.commit()
+            logger.info(f"✅ Удалено {deleted_count} старых медиа (старше {MAX_MEDIA_AGE_DAYS} дня)")
+            
+    except Exception as e:
+        logger.error(f"Ошибка очистки медиа: {e}")
 
 # ✅ БАН
 @router.callback_query(lambda c: c.data == "admin_ban")
@@ -545,7 +641,8 @@ async def admin_cleanup(callback: CallbackQuery):
     
     try:
         await cleanup_old_data()
-        await callback.message.edit_text("✅ Очистка БД завершена!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        await cleanup_old_media()  # ✅ Очистка старых медиа
+        await callback.message.edit_text("✅ Очистка БД и медиа завершена!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
         ]), parse_mode="HTML")
     except Exception as e:
@@ -596,6 +693,19 @@ async def admin_status(callback: CallbackQuery):
     
     import psutil
     
+    db_size = 0
+    if os.path.exists("data/app.db"):
+        db_size = os.path.getsize("data/app.db") / 1024 / 1024
+    
+    media_size = 0
+    media_files = 0
+    if os.path.exists(settings.MEDIA_DIR):
+        media_files = len(os.listdir(settings.MEDIA_DIR))
+        for f in os.listdir(settings.MEDIA_DIR):
+            f_path = os.path.join(settings.MEDIA_DIR, f)
+            if os.path.isfile(f_path):
+                media_size += os.path.getsize(f_path)
+    
     text = f"""
 💚 <b>Статус SafeSaverX</b>
 
@@ -608,7 +718,11 @@ async def admin_status(callback: CallbackQuery):
 🔄 Uptime: {int((time.time() - psutil.boot_time()) / 3600)}ч
 
 <b>База данных:</b>
-📁 Размер: {os.path.getsize('data/app.db') / 1024 / 1024:.1f} МБ
+📁 Размер: {db_size:.1f} МБ
+
+<b>Медиа:</b>
+💾 Файлов: {media_files} ({media_size / 1024 / 1024:.1f} МБ)
+📦 Лимит: {MAX_MEDIA_FILES} файлов
 """
     
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
