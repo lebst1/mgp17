@@ -9,7 +9,7 @@ from src.db.repositories.business_repository import BusinessRepository
 from src.db.session import async_session, cleanup_old_data
 from src.config import settings
 from sqlalchemy import select, func, or_
-from src.db.models import User, SavedMessage
+from src.db.models import User, SavedMessage, BusinessConnection  # ✅ ДОБАВИЛИ BusinessConnection
 import os
 import logging
 import time
@@ -85,6 +85,15 @@ async def show_admin_panel(target):
         await target.answer(text, reply_markup=keyboard, parse_mode="HTML")
     else:
         await target.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@router.message(Command("admin"))
+async def admin_panel(message: Message):
+    if not await is_admin(message.from_user.id):
+        await message.answer("⛔ У вас нет доступа к админ панели.")
+        return
+    
+    await show_admin_panel(message)
 
 
 # ✅ СТАТИСТИКА
@@ -200,7 +209,6 @@ async def process_search(message: Message, state: FSMContext):
     query = message.text.strip()
     
     async with async_session() as session:
-        # Ищем по ID или username
         if query.isdigit():
             user = await session.scalar(select(User).where(User.telegram_id == int(query)))
         else:
@@ -212,7 +220,6 @@ async def process_search(message: Message, state: FSMContext):
             await state.clear()
             return
         
-        # Считаем сообщения пользователя
         messages_count = await session.scalar(
             select(func.count()).select_from(SavedMessage).where(SavedMessage.user_id == user.telegram_id)
         )
@@ -295,10 +302,8 @@ async def process_user_messages(message: Message, state: FSMContext):
     query = message.text.strip().lower()
     
     async with async_session() as session:
-        # Базовый запрос
         stmt = select(SavedMessage).where(SavedMessage.user_id == user_id)
         
-        # Фильтруем
         if query == "deleted":
             stmt = stmt.where(SavedMessage.is_deleted == True)
             title = "🗑️ Удаленные сообщения"
@@ -313,9 +318,6 @@ async def process_user_messages(message: Message, state: FSMContext):
             title = f"📝 Последние {limit} сообщений"
         else:
             await message.answer("❌ Неверный запрос. Используй: deleted, edited, all или число.")
-            return
-        
-        if query not in ["deleted", "edited", "all"] and not query.isdigit():
             return
         
         if query in ["deleted", "edited", "all"]:
@@ -398,7 +400,6 @@ async def admin_ban_user(callback: CallbackQuery):
     else:
         await callback.answer(f"❌ Пользователь {user_id} не найден!", show_alert=True)
     
-    # Возвращаемся к пользователю
     await show_user_info(callback, user_id)
 
 
@@ -417,7 +418,6 @@ async def admin_unban_user(callback: CallbackQuery):
     else:
         await callback.answer(f"❌ Пользователь {user_id} не найден!", show_alert=True)
     
-    # Возвращаемся к пользователю
     await show_user_info(callback, user_id)
 
 
@@ -497,7 +497,6 @@ async def process_ban_unban(message: Message, state: FSMContext):
     
     try:
         user_id = int(message.text.strip())
-        # Определяем, бан или разбан (по контексту)
         user = await UserRepository.get_by_id(user_id)
         if user:
             new_status = not user.is_active
