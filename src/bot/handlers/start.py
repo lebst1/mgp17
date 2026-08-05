@@ -8,7 +8,7 @@ import os
 router = Router()
 
 
-# ✅ ОСНОВНОЕ МЕНЮ
+# ✅ ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ МЕНЮ
 async def get_main_menu(user, has_business):
     text = f"""
 <b>SafeSaverX</b>
@@ -16,7 +16,6 @@ async def get_main_menu(user, has_business):
 👤 <b>Профиль</b>
 ▸ Статус: <b>{'активен' if user.is_active else 'неактивен'}</b>
 ▸ SAVE MODE: <b>{'включен' if user.savemode_enabled else 'выключен'}</b>
-▸ Business: <b>{'подключен' if has_business else 'не подключен'}</b>
 
 📌 <b>Как подключить бота:</b>
 1. Нажми «📋 Скопировать юзернейм»
@@ -28,7 +27,7 @@ async def get_main_menu(user, has_business):
 <b>Что умеет бот:</b>
 • Присылает уведомления, когда собеседник удаляет сообщение
 • Присылает уведомления, когда собеседник редактирует сообщение
-• Сохраняет сгорающие фото, голосовые и видео
+• Сохраняет фото, голосовые и видео
 """
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -50,7 +49,7 @@ async def get_main_menu(user, has_business):
     return text, keyboard
 
 
-# ✅ ОТПРАВКА ГЛАВНОГО МЕНЮ
+# ✅ ОТПРАВКА МЕНЮ (С ФОТО ИЛИ БЕЗ)
 async def send_main_menu(target, user, has_business):
     text, keyboard = await get_main_menu(user, has_business)
     photo_path = "assets/menu.jpg"
@@ -119,11 +118,9 @@ async def show_help(callback: CallbackQuery):
         [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")]
     ])
     
-    # ✅ Проверяем, можно ли редактировать
     try:
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
     except Exception:
-        # Если нельзя редактировать — удаляем и отправляем новое
         await callback.message.delete()
         await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
     
@@ -138,7 +135,7 @@ async def important(callback: CallbackQuery):
 
 1️⃣ Дай ВСЕ разрешения на работу с сообщениями
 2️⃣ Бот присылает уведомления при удалении/правке
-3️⃣ Сохраняет сгорающие фото, голосовые и видео
+3️⃣ Сохраняет фото, голосовые и видео
 """
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")]
