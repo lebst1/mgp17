@@ -2,7 +2,7 @@ import logging
 import json
 import os
 from aiogram import Router, F, Bot
-from aiogram.types import Message, BusinessConnection, BusinessMessagesDeleted, FSInputFile
+from aiogram.types import Message, BusinessConnection, BusinessMessagesDeleted, FSInputFile, Update
 from aiogram.filters import Command
 from datetime import datetime
 from src.db.repositories.user_repository import UserRepository
@@ -140,6 +140,7 @@ async def send_edit_notification(bot: Bot, user_id: int, saved_msg, old_text: st
         await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
 
 
+# ✅ ПОДКЛЮЧЕНИЕ БИЗНЕС-АККАУНТА
 @router.business_connection()
 async def handle_business_connection(event: BusinessConnection, bot: Bot):
     user_id = event.user.id
@@ -176,6 +177,7 @@ async def handle_business_connection(event: BusinessConnection, bot: Bot):
     logger.info(f"✅ Пользователь {user_id} подключил бизнес-аккаунт")
 
 
+# ✅ НОВЫЕ СООБЩЕНИЯ
 @router.business_message()
 async def handle_business_message(message: Message):
     if message.edit_date is not None:
@@ -220,7 +222,6 @@ async def handle_business_message(message: Message):
             "original_date": datetime.utcnow()
         }
         
-        # ✅ СОХРАНЯЕМ МЕДИА
         media_path = None
         media_file_id = None
         media_type = None
@@ -231,31 +232,26 @@ async def handle_business_message(message: Message):
             media_file_id = message.photo[-1].file_id
             media_size = message.photo[-1].file_size
             media_path = await download_media(message.bot, media_file_id)
-            
         elif message.video:
             media_type = "video"
             media_file_id = message.video.file_id
             media_size = message.video.file_size
             media_path = await download_media(message.bot, media_file_id)
-            
         elif message.document:
             media_type = "document"
             media_file_id = message.document.file_id
             media_size = message.document.file_size
             media_path = await download_media(message.bot, media_file_id)
-            
         elif message.audio:
             media_type = "audio"
             media_file_id = message.audio.file_id
             media_size = message.audio.file_size
             media_path = await download_media(message.bot, media_file_id)
-            
         elif message.voice:
             media_type = "voice"
             media_file_id = message.voice.file_id
             media_size = message.voice.file_size
             media_path = await download_media(message.bot, media_file_id)
-            
         elif message.sticker:
             media_type = "sticker"
             media_file_id = message.sticker.file_id
@@ -275,6 +271,7 @@ async def handle_business_message(message: Message):
         logger.error(f"❌ Ошибка сохранения сообщения: {e}")
 
 
+# ✅ УДАЛЕННЫЕ СООБЩЕНИЯ
 @router.deleted_business_messages()
 async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
     logger.info(f"🔍 Получено удаление бизнес-сообщений!")
@@ -314,12 +311,10 @@ async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
             logger.error(f"❌ Ошибка обработки удаления: {e}")
 
 
-# ✅ ОБРАБОТЧИК ПРАВОК
-@router.business_message()
+# ✅ ОТРЕДАКТИРОВАННЫЕ СООБЩЕНИЯ — ПРАВИЛЬНЫЙ ОБРАБОТЧИК
+@router.edited_business_message()
 async def handle_business_edited(message: Message):
-    if not message.edit_date:
-        return
-    
+    """Обработчик отредактированных бизнес-сообщений"""
     if not message.from_user:
         return
     
@@ -329,11 +324,14 @@ async def handle_business_edited(message: Message):
     
     user = await BusinessRepository.get_user_by_connection(connection_id)
     if not user:
+        logger.warning(f"⚠️ Пользователь не найден для connection_id: {connection_id}")
         return
     
     logger.info(f"✏️ Отредактировано сообщение {message.message_id} от {user.telegram_id}")
+    logger.info(f"📝 Новый текст: {message.text or message.caption}")
     
     try:
+        # Ищем оригинальное сообщение в БД
         saved_msg = await MessageRepository.get_by_id_and_chat(
             message_id=message.message_id,
             chat_id=message.chat.id,
@@ -344,6 +342,7 @@ async def handle_business_edited(message: Message):
             old_text = saved_msg.text or ""
             new_text = message.text or message.caption or ""
             
+            # Сохраняем историю правок
             history = json.loads(saved_msg.edit_history) if saved_msg.edit_history else []
             history.append({
                 "old_text": old_text,
@@ -361,58 +360,14 @@ async def handle_business_edited(message: Message):
                 
             logger.info(f"✅ Обновлена история правок для сообщения {message.message_id}")
             
+            # Отправляем уведомление только если сообщение отредактировал не владелец
             if saved_msg.from_user_id != user.telegram_id:
                 await send_edit_notification(message.bot, user.telegram_id, saved_msg, old_text, new_text)
                 logger.info(f"✅ Уведомление о правке отправлено владельцу {user.telegram_id}")
             else:
-                logger.info(f"ℹ️ Сообщение {message.message_id} отредактировано владельцем, уведомление не отправляем")
+                logger.info(f"ℹ️ Сообщение {message.message_id} отредактировано владельцем")
         else:
-            # Сохраняем как новое с пометкой is_edited
-            logger.warning(f"⚠️ Сообщение {message.message_id} не найдено в БД для правки, сохраняем как новое")
-            message_data = {
-                "user_id": user.telegram_id,
-                "connection_id": connection_id,
-                "chat_id": message.chat.id,
-                "chat_title": message.chat.title or "Личный чат",
-                "message_id": message.message_id,
-                "from_user_id": message.from_user.id,
-                "from_username": message.from_user.username,
-                "from_first_name": message.from_user.first_name,
-                "text": message.text or message.caption,
-                "is_edited": True,
-                "saved_at": datetime.utcnow(),
-                "original_date": datetime.utcnow()
-            }
-            
-            media_path = None
-            media_file_id = None
-            media_type = None
-            media_size = None
-            
-            if message.photo:
-                media_type = "photo"
-                media_file_id = message.photo[-1].file_id
-                media_size = message.photo[-1].file_size
-                media_path = await download_media(message.bot, media_file_id)
-            elif message.video:
-                media_type = "video"
-                media_file_id = message.video.file_id
-                media_size = message.video.file_size
-                media_path = await download_media(message.bot, media_file_id)
-            elif message.document:
-                media_type = "document"
-                media_file_id = message.document.file_id
-                media_size = message.document.file_size
-                media_path = await download_media(message.bot, media_file_id)
-            
-            if media_path:
-                message_data["media_path"] = media_path
-                message_data["media_file_id"] = media_file_id
-                message_data["media_type"] = media_type
-                message_data["media_size"] = media_size
-            
-            await MessageRepository.save_message(message_data)
-            logger.info(f"💾 Сохранено отредактированное сообщение {message.message_id}")
+            logger.warning(f"⚠️ Сообщение {message.message_id} не найдено в БД")
             
     except Exception as e:
         logger.error(f"❌ Ошибка обработки правки: {e}")
