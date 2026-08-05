@@ -1,13 +1,14 @@
-from aiogram import Router, Bot
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram import Router
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile
 from aiogram.filters import Command
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.business_repository import BusinessRepository
+import os
 
 router = Router()
 
 
-# ✅ ГЛАВНОЕ МЕНЮ (СТАРТ)
+# ✅ ГЛАВНОЕ МЕНЮ (СТАРТ) С ФОТО
 @router.message(Command("start"))
 async def start_command(message: Message):
     user = await UserRepository.get_by_id(message.from_user.id)
@@ -59,7 +60,18 @@ async def start_command(message: Message):
         ]
     ])
     
-    await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    # ✅ ОТПРАВКА ФОТО С ТЕКСТОМ
+    photo_path = "assets/menu.jpg"
+    if os.path.exists(photo_path):
+        photo = FSInputFile(photo_path)
+        await message.answer_photo(
+            photo=photo,
+            caption=text,
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+    else:
+        await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 
 # ✅ КОПИРОВАНИЕ ЮЗЕРНЕЙМ
@@ -175,12 +187,13 @@ async def savemode_off(callback: CallbackQuery):
     await callback.answer("❌ SAVE MODE выключен! Используй /savemode off")
 
 
-# ✅ КОМАНДЫ
+# ✅ КОМАНДА /help
 @router.message(Command("help"))
 async def help_command(message: Message):
     await show_help(message)
 
 
+# ✅ КОМАНДА /settings
 @router.message(Command("settings"))
 async def settings_command(message: Message):
     await show_settings(message)
