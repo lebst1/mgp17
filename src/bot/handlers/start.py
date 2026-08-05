@@ -1,5 +1,12 @@
 from aiogram import Router, Bot
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile
+from aiogram.types import (
+    Message,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    CallbackQuery,
+    FSInputFile,
+    CopyTextButton
+)
 from aiogram.filters import Command
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.business_repository import BusinessRepository
@@ -80,22 +87,40 @@ async def get_main_menu(user, has_business):
 • Сохраняет сгорающие фото, голосовые и видео
 """
     
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    keyboard = InlineKeyboardMarkup(
+    inline_keyboard=[
         [
-            InlineKeyboardButton(text="📋 Скопировать юзернейм", callback_data="copy_username")
+            InlineKeyboardButton(
+                text="📋 Скопировать юзернейм",
+                copy_text=CopyTextButton(
+                    text="@SafeSaverX_bot"
+                )
+            )
         ],
         [
-            InlineKeyboardButton(text="✏️ Редактирование профиля", callback_data="edit_profile")
+            InlineKeyboardButton(
+                text="✏️ Редактирование профиля",
+                callback_data="edit_profile"
+            )
         ],
         [
-            InlineKeyboardButton(text="❓ Описание команд", callback_data="show_help"),
-            InlineKeyboardButton(text="⭐ Важное", callback_data="important")
+            InlineKeyboardButton(
+                text="❓ Описание команд",
+                callback_data="show_help"
+            ),
+            InlineKeyboardButton(
+                text="⭐ Важное",
+                callback_data="important"
+            )
         ],
         [
-            InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings")
+            InlineKeyboardButton(
+                text="⚙️ Настройки",
+                callback_data="settings"
+            )
         ]
-    ])
-    
+    ]
+)
     if settings.REQUIRED_CHANNEL_URL:
         keyboard.inline_keyboard.append([
             InlineKeyboardButton(text="📢 Наш канал", url=settings.REQUIRED_CHANNEL_URL)
