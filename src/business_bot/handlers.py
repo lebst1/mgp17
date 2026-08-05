@@ -190,9 +190,8 @@ async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
     logger.info(f"📋 message_ids: {event.message_ids}")
     logger.info(f"📌 chat_id: {event.chat.id}")
 
-    # ✅ КОМУ ОТПРАВЛЯТЬ УВЕДОМЛЕНИЕ? — ВЛАДЕЛЬЦУ БИЗНЕС-АККАУНТА
-    user = await BusinessRepository.get_user_by_connection(event.business_connection_id)
-    if not user:
+    owner = await BusinessRepository.get_user_by_connection(event.business_connection_id)
+    if not owner:
         logger.warning(f"⚠️ Пользователь не найден для connection_id: {event.business_connection_id}")
         return
 
@@ -201,7 +200,7 @@ async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
             saved_msg = await MessageRepository.get_by_id_and_chat(
                 message_id=message_id,
                 chat_id=event.chat.id,
-                user_id=user.telegram_id
+                user_id=owner.telegram_id
             )
             
             if saved_msg:
@@ -211,8 +210,12 @@ async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
                     await session.commit()
                 logger.info(f"✅ Сообщение {message_id} отмечено как удаленное")
 
-                # ✅ ОТПРАВЛЯЕМ УВЕДОМЛЕНИЕ ВЛАДЕЛЬЦУ БИЗНЕС-АККАУНТА
-                await send_deleted_notification(bot, user.telegram_id, saved_msg)
+                # ✅ ОТПРАВЛЯЕМ УВЕДОМЛЕНИЕ ТОЛЬКО ЕСЛИ СООБЩЕНИЕ НАПИСАЛ НЕ ВЛАДЕЛЕЦ
+                if saved_msg.from_user_id != owner.telegram_id:
+                    await send_deleted_notification(bot, owner.telegram_id, saved_msg)
+                    logger.info(f"✅ Уведомление отправлено владельцу {owner.telegram_id}")
+                else:
+                    logger.info(f"ℹ️ Сообщение {message_id} удалено владельцем, уведомление не отправляем")
             else:
                 logger.warning(f"⚠️ Сообщение {message_id} не найдено в БД")
                 
