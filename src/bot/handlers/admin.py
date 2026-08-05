@@ -1,5 +1,5 @@
 from aiogram import Router, Bot, F
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile, BufferedInputFile
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -15,6 +15,7 @@ import logging
 import time
 import shutil
 from datetime import datetime, timedelta
+import io
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,9 @@ class AdminStates(StatesGroup):
     waiting_for_user_messages = State()
     waiting_for_view_media = State()
     waiting_for_chat_view = State()
+    waiting_for_chat_select = State()
+    waiting_for_chat_search = State()
+    waiting_for_chat_message = State()
 
 
 # ✅ ПРОВЕРКА АДМИНА
@@ -55,7 +59,7 @@ async def show_admin_panel(target):
 🚫 <b>Бан</b> — заблокировать пользователя
 ✅ <b>Разбан</b> — разблокировать пользователя
 📋 <b>Список пользователей</b> — все пользователи
-💬 <b>Чат пользователя</b> — просмотр переписки
+💬 <b>Чаты пользователя</b> — просмотр всех чатов
 🗑️ <b>Очистка БД</b> — удалить старые данные
 💾 <b>Бэкап</b> — создать бэкап
 💚 <b>Статус</b> — состояние бота
@@ -77,7 +81,7 @@ async def show_admin_panel(target):
             InlineKeyboardButton(text="📋 Список пользователей", callback_data="admin_users")
         ],
         [
-            InlineKeyboardButton(text="💬 Чат пользователя", callback_data="admin_chat")
+            InlineKeyboardButton(text="💬 Чаты пользователя", callback_data="admin_chats")
         ],
         [
             InlineKeyboardButton(text="🗑️ Очистка БД", callback_data="admin_cleanup"),
@@ -240,6 +244,20 @@ async def process_search(message: Message, state: FSMContext):
             await state.clear()
             return
         
+        # Получаем список чатов пользователя
+        chats = await session.execute(
+            select(
+                SavedMessage.chat_id,
+                SavedMessage.chat_title,
+                func.count(SavedMessage.id).label('count'),
+                func.max(SavedMessage.saved_at).label('last_activity')
+            )
+            .where(SavedMessage.user_id == user.telegram_id)
+            .group_by(SavedMessage.chat_id, SavedMessage.chat_title)
+            .order_by(func.max(SavedMessage.saved_at).desc())
+        )
+        chats = chats.all()
+        
         messages_count = await session.scalar(
             select(func.count()).select_from(SavedMessage).where(SavedMessage.user_id == user.telegram_id)
         )
@@ -266,12 +284,13 @@ async def process_search(message: Message, state: FSMContext):
 📝 Сообщений: {messages_count or 0}
 🗑️ Удалено: {deleted_count or 0}
 ✏️ Отредактировано: {edited_count or 0}
+💬 Чатов: {len(chats)}
 📅 Зарегистрирован: {user.created_at.strftime('%d.%m.%Y %H:%M') if user.created_at else 'Неизвестно'}
 """
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="💬 Открыть чат", callback_data=f"admin_chat_user_{user.telegram_id}")
+            InlineKeyboardButton(text="💬 Список чатов", callback_data=f"admin_chats_user_{user.telegram_id}")
         ],
         [
             InlineKeyboardButton(text="🚫 Забанить", callback_data=f"admin_ban_user_{user.telegram_id}"),
@@ -286,150 +305,593 @@ async def process_search(message: Message, state: FSMContext):
     await state.clear()
 
 
-# ✅ ЧАТ ПОЛЬЗОВАТЕЛЯ (НОВЫЙ ИНТЕРФЕЙС)
-@router.callback_query(lambda c: c.data == "admin_chat")
-async def admin_chat(callback: CallbackQuery, state: FSMContext):
-    if not await is_admin(callback.from_user.id):
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    await callback.message.edit_text(
-        "💬 <b>Чат пользователя</b>\n\n"
-        "Отправь ID пользователя, чей чат хочешь посмотреть.\n\n"
-        "Отправь /cancel чтобы отменить.",
-        parse_mode="HTML"
-    )
-    await state.set_state(AdminStates.waiting_for_chat_view)
-    await callback.answer()
-
-
-@router.message(AdminStates.waiting_for_chat_view)
-async def process_chat_view(message: Message, state: FSMContext):
-    if not await is_admin(message.from_user.id):
-        await message.answer("⛔ Доступ запрещен")
-        await state.clear()
-        return
-    
-    try:
-        user_id = int(message.text.strip())
-        await show_chat_interface(message, user_id)
-    except ValueError:
-        await message.answer("❌ Неверный формат. Отправь числовой ID.")
-    
-    await state.clear()
-
-
-@router.callback_query(lambda c: c.data.startswith("admin_chat_user_"))
-async def admin_chat_user(callback: CallbackQuery):
+# ✅ СПИСОК ЧАТОВ ПОЛЬЗОВАТЕЛЯ
+@router.callback_query(lambda c: c.data.startswith("admin_chats_user_"))
+async def admin_chats_user(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
     user_id = int(callback.data.split("_")[-1])
-    await show_chat_interface(callback.message, user_id)
+    await show_chats_list(callback.message, user_id)
     await callback.answer()
 
 
-async def show_chat_interface(target, user_id: int):
-    """Показывает чат пользователя в виде диалога"""
+@router.callback_query(lambda c: c.data == "admin_chats")
+async def admin_chats(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await callback.message.edit_text(
+        "💬 <b>Чаты пользователя</b>\n\n"
+        "Отправь ID пользователя, чтобы увидеть список его чатов.\n\n"
+        "Или отправь <b>поиск: текст</b> чтобы найти чат по названию.\n\n"
+        "Отправь /cancel чтобы отменить.",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminStates.waiting_for_chat_select)
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_for_chat_select)
+async def process_chat_select(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        await message.answer("⛔ Доступ запрещен")
+        await state.clear()
+        return
+    
+    text = message.text.strip()
+    
+    if text.lower().startswith("поиск:") or text.lower().startswith("search:"):
+        search_query = text.split(":", 1)[1].strip()
+        await show_chats_search(message, search_query)
+        await state.clear()
+        return
+    
+    try:
+        user_id = int(text)
+        await show_chats_list(message, user_id)
+    except ValueError:
+        await message.answer("❌ Неверный формат. Отправь ID пользователя или 'поиск: название'.")
+    
+    await state.clear()
+
+
+async def show_chats_search(target, search_query: str):
+    """Поиск чатов по названию"""
     
     async with async_session() as session:
-        # Получаем пользователя
+        chats = await session.execute(
+            select(
+                SavedMessage.user_id,
+                SavedMessage.chat_id,
+                SavedMessage.chat_title,
+                func.count(SavedMessage.id).label('count'),
+                func.max(SavedMessage.saved_at).label('last_activity')
+            )
+            .where(SavedMessage.chat_title.ilike(f"%{search_query}%"))
+            .group_by(SavedMessage.user_id, SavedMessage.chat_id, SavedMessage.chat_title)
+            .order_by(func.max(SavedMessage.saved_at).desc())
+            .limit(30)
+        )
+        chats = chats.all()
+    
+    if not chats:
+        await target.answer(f"❌ Чаты с названием '{search_query}' не найдены.")
+        return
+    
+    text = f"""
+🔍 <b>Результаты поиска чатов</b>
+По запросу: <i>"{search_query}"</i>
+Найдено: {len(chats)}
+
+➖➖➖➖➖➖➖➖➖➖➖➖
+"""
+    
+    keyboard_buttons = []
+    
+    for chat in chats:
+        chat_title = chat.chat_title or f"Чат {chat.chat_id}"
+        if len(chat_title) > 25:
+            chat_title = chat_title[:22] + "..."
+        
+        button_text = f"👤 {chat.user_id} | {chat_title} ({chat.count})"
+        
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"admin_chat_open_{chat.user_id}_{chat.chat_id}"
+            )
+        ])
+    
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")
+    ])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    await target.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+async def show_chats_list(target, user_id: int):
+    """Показывает список всех чатов пользователя"""
+    
+    async with async_session() as session:
         user = await session.scalar(select(User).where(User.telegram_id == user_id))
         if not user:
             await target.answer("❌ Пользователь не найден")
             return
         
-        # Получаем сообщения пользователя (последние 30)
-        messages = await session.scalars(
-            select(SavedMessage)
+        chats = await session.execute(
+            select(
+                SavedMessage.chat_id,
+                SavedMessage.chat_title,
+                func.count(SavedMessage.id).label('count'),
+                func.max(SavedMessage.saved_at).label('last_activity'),
+                func.sum(func.cast(SavedMessage.is_deleted, func.Integer())).label('deleted_count'),
+                func.sum(func.cast(SavedMessage.is_edited, func.Integer())).label('edited_count')
+            )
             .where(SavedMessage.user_id == user_id)
-            .order_by(SavedMessage.saved_at.desc())
-            .limit(30)
+            .group_by(SavedMessage.chat_id, SavedMessage.chat_title)
+            .order_by(func.max(SavedMessage.saved_at).desc())
         )
-        messages = list(messages)
+        chats = chats.all()
     
-    # Формируем заголовок чата
-    header = f"""
-💬 <b>Чат пользователя</b>
+    if not chats:
+        await target.answer("📭 Нет сохранённых чатов у этого пользователя.")
+        return
+    
+    text = f"""
+💬 <b>Чаты пользователя</b>
 
 👤 <b>{user.first_name or user.username or 'Пользователь'}</b>
 🆔 <code>{user.telegram_id}</code>
-📊 <b>Всего сообщений:</b> {len(messages)}
-📅 <b>Активен:</b> {'✅ Да' if user.is_active else '❌ Нет'}
+📊 <b>Всего чатов:</b> {len(chats)}
 
 ➖➖➖➖➖➖➖➖➖➖➖➖
 """
     
-    # Формируем сообщения как в чате
-    chat_text = header
-    for msg in reversed(messages):  # От старых к новым
-        time_str = msg.saved_at.strftime('%H:%M')
-        name = msg.from_username or msg.from_first_name or 'Аноним'
-        
-        # Определяем, чье сообщение
-        if msg.from_user_id == user.telegram_id:
-            # Сообщение пользователя
-            chat_text += f"\n👤 <b>{name}</b> [{time_str}]:\n"
-        else:
-            # Сообщение от другого пользователя
-            chat_text += f"\n🤖 <b>{name}</b> [{time_str}]:\n"
-        
-        # Текст сообщения
-        if msg.text:
-            text_preview = msg.text[:500]
-            if len(msg.text) > 500:
-                text_preview += "..."
-            chat_text += f"{text_preview}\n"
-        
-        # Медиа
-        if msg.media_type:
-            chat_text += f"🖼️ <i>[{msg.media_type}]</i>\n"
-        
-        # Статус
-        status = []
-        if msg.is_deleted:
-            status.append("🗑️ Удалено")
-        if msg.is_edited:
-            status.append("✏️ Отредактировано")
-        if status:
-            chat_text += f"<i>{' '.join(status)}</i>\n"
-        
-        chat_text += "➖➖➖➖➖➖➖➖➖➖\n"
-        
-        # Если текст слишком длинный — разбиваем
-        if len(chat_text) > 3800:
-            # Отправляем текущую часть
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="📥 Показать ещё",
-                        callback_data=f"admin_chat_more_{user_id}_{len(messages)}"
-                    )
-                ],
-                [
-                    InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")
-                ]
-            ])
-            await target.answer(chat_text, reply_markup=keyboard, parse_mode="HTML")
-            chat_text = header  # Сбрасываем для следующей части
+    keyboard_buttons = []
     
-    # Отправляем последнюю часть
+    for chat in chats:
+        chat_title = chat.chat_title or f"Чат {chat.chat_id}"
+        if len(chat_title) > 20:
+            chat_title = chat_title[:17] + "..."
+        
+        status = ""
+        if chat.deleted_count and chat.deleted_count > 0:
+            status += f"🗑️{chat.deleted_count} "
+        if chat.edited_count and chat.edited_count > 0:
+            status += f"✏️{chat.edited_count} "
+        
+        button_text = f"💬 {chat_title} ({chat.count}) {status}".strip()
+        
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"admin_chat_open_{user_id}_{chat.chat_id}"
+            )
+        ])
+    
+    keyboard_buttons.append([
+        InlineKeyboardButton(
+            text="🔍 Поиск по чатам",
+            callback_data=f"admin_chat_search_{user_id}"
+        ),
+        InlineKeyboardButton(
+            text="📊 Статистика чатов",
+            callback_data=f"admin_chat_stats_{user_id}"
+        )
+    ])
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")
+    ])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    await target.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+# ✅ ПОИСК ПО ЧАТАМ ПОЛЬЗОВАТЕЛЯ
+@router.callback_query(lambda c: c.data.startswith("admin_chat_search_"))
+async def admin_chat_search_user(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    user_id = int(callback.data.split("_")[-1])
+    
+    await callback.message.edit_text(
+        f"🔍 <b>Поиск чата у пользователя {user_id}</b>\n\n"
+        f"Отправь название чата для поиска.\n\n"
+        f"Отправь /cancel чтобы отменить.",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminStates.waiting_for_chat_search)
+    await state.update_data(user_id=user_id)
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_for_chat_search)
+async def process_chat_search(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        await message.answer("⛔ Доступ запрещен")
+        await state.clear()
+        return
+    
+    data = await state.get_data()
+    user_id = data.get('user_id')
+    search_query = message.text.strip()
+    
+    async with async_session() as session:
+        chats = await session.execute(
+            select(
+                SavedMessage.chat_id,
+                SavedMessage.chat_title,
+                func.count(SavedMessage.id).label('count'),
+                func.max(SavedMessage.saved_at).label('last_activity')
+            )
+            .where(
+                SavedMessage.user_id == user_id,
+                SavedMessage.chat_title.ilike(f"%{search_query}%")
+            )
+            .group_by(SavedMessage.chat_id, SavedMessage.chat_title)
+            .order_by(func.max(SavedMessage.saved_at).desc())
+            .limit(20)
+        )
+        chats = chats.all()
+    
+    if not chats:
+        await message.answer(f"❌ Чаты с названием '{search_query}' не найдены.")
+        await state.clear()
+        return
+    
+    text = f"""
+🔍 <b>Результаты поиска у пользователя {user_id}</b>
+По запросу: <i>"{search_query}"</i>
+Найдено: {len(chats)}
+
+➖➖➖➖➖➖➖➖➖➖➖➖
+"""
+    
+    keyboard_buttons = []
+    
+    for chat in chats:
+        chat_title = chat.chat_title or f"Чат {chat.chat_id}"
+        if len(chat_title) > 25:
+            chat_title = chat_title[:22] + "..."
+        
+        button_text = f"💬 {chat_title} ({chat.count})"
+        
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"admin_chat_open_{user_id}_{chat.chat_id}"
+            )
+        ])
+    
+    keyboard_buttons.append([
+        InlineKeyboardButton(
+            text="🔙 Назад к чатам",
+            callback_data=f"admin_chats_user_{user_id}"
+        )
+    ])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    await state.clear()
+
+
+# ✅ СТАТИСТИКА ЧАТОВ ПОЛЬЗОВАТЕЛЯ
+@router.callback_query(lambda c: c.data.startswith("admin_chat_stats_"))
+async def admin_chat_stats(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    user_id = int(callback.data.split("_")[-1])
+    
+    async with async_session() as session:
+        total_messages = await session.scalar(
+            select(func.count()).select_from(SavedMessage).where(SavedMessage.user_id == user_id)
+        )
+        total_deleted = await session.scalar(
+            select(func.count()).select_from(SavedMessage).where(
+                SavedMessage.user_id == user_id,
+                SavedMessage.is_deleted == True
+            )
+        )
+        total_edited = await session.scalar(
+            select(func.count()).select_from(SavedMessage).where(
+                SavedMessage.user_id == user_id,
+                SavedMessage.is_edited == True
+            )
+        )
+        total_media = await session.scalar(
+            select(func.count()).select_from(SavedMessage).where(
+                SavedMessage.user_id == user_id,
+                SavedMessage.media_path.isnot(None)
+            )
+        )
+        
+        chats = await session.execute(
+            select(
+                SavedMessage.chat_title,
+                func.count(SavedMessage.id).label('count'),
+                func.sum(func.cast(SavedMessage.is_deleted, func.Integer())).label('deleted'),
+                func.sum(func.cast(SavedMessage.is_edited, func.Integer())).label('edited'),
+                func.sum(func.cast(SavedMessage.media_path.isnot(None), func.Integer())).label('media')
+            )
+            .where(SavedMessage.user_id == user_id)
+            .group_by(SavedMessage.chat_title)
+            .order_by(func.count(SavedMessage.id).desc())
+            .limit(10)
+        )
+        chats = chats.all()
+    
+    text = f"""
+📊 <b>Статистика чатов</b>
+👤 Пользователь: <code>{user_id}</code>
+
+📝 <b>Всего сообщений:</b> {total_messages or 0}
+🗑️ <b>Удалено:</b> {total_deleted or 0}
+✏️ <b>Отредактировано:</b> {total_edited or 0}
+🖼️ <b>Медиа:</b> {total_media or 0}
+
+<b>Топ чатов:</b>
+"""
+    
+    for i, chat in enumerate(chats, 1):
+        chat_title = chat.chat_title or "Без названия"
+        if len(chat_title) > 20:
+            chat_title = chat_title[:17] + "..."
+        text += f"{i}. {chat_title}: {chat.count} сообщ. (🗑️{chat.deleted or 0} ✏️{chat.edited or 0} 🖼️{chat.media or 0})\n"
+    
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🔄 Обновить", callback_data=f"admin_chat_user_{user_id}"),
-            InlineKeyboardButton(text="🗑️ Удалить всё", callback_data=f"admin_chat_clear_{user_id}")
-        ],
-        [
-            InlineKeyboardButton(text="🚫 Забанить", callback_data=f"admin_ban_user_{user_id}"),
-            InlineKeyboardButton(text="✅ Разбанить", callback_data=f"admin_unban_user_{user_id}")
+            InlineKeyboardButton(
+                text="💬 К чатам",
+                callback_data=f"admin_chats_user_{user_id}"
+            )
         ],
         [
             InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")
         ]
     ])
     
-    await target.answer(chat_text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+# ✅ ОТКРЫТЬ КОНКРЕТНЫЙ ЧАТ
+@router.callback_query(lambda c: c.data.startswith("admin_chat_open_"))
+async def admin_chat_open(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    parts = callback.data.split("_")
+    user_id = int(parts[3])
+    chat_id = int(parts[4])
+    
+    await show_chat_messages(callback.message, user_id, chat_id)
+    await callback.answer()
+
+
+# ✅ ОТПРАВИТЬ СООБЩЕНИЕ В ЧАТ
+@router.callback_query(lambda c: c.data.startswith("admin_chat_send_"))
+async def admin_chat_send(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    parts = callback.data.split("_")
+    user_id = int(parts[3])
+    chat_id = int(parts[4])
+    
+    await callback.message.edit_text(
+        f"📨 <b>Отправить сообщение в чат</b>\n\n"
+        f"Пользователь: <code>{user_id}</code>\n"
+        f"Чат: <code>{chat_id}</code>\n\n"
+        f"Отправь текст сообщения для отправки в этот чат.\n\n"
+        f"Отправь /cancel чтобы отменить.",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminStates.waiting_for_chat_message)
+    await state.update_data(user_id=user_id, chat_id=chat_id)
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_for_chat_message)
+async def process_chat_message(message: Message, bot: Bot, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        await message.answer("⛔ Доступ запрещен")
+        await state.clear()
+        return
+    
+    data = await state.get_data()
+    user_id = data.get('user_id')
+    chat_id = data.get('chat_id')
+    
+    try:
+        if message.text:
+            await bot.send_message(chat_id=chat_id, text=message.text, parse_mode="HTML")
+            await message.answer(f"✅ Сообщение отправлено в чат {chat_id}")
+        elif message.photo:
+            await bot.send_photo(chat_id=chat_id, photo=message.photo[-1].file_id, caption=message.caption)
+            await message.answer(f"✅ Фото отправлено в чат {chat_id}")
+        elif message.video:
+            await bot.send_video(chat_id=chat_id, video=message.video.file_id, caption=message.caption)
+            await message.answer(f"✅ Видео отправлено в чат {chat_id}")
+        else:
+            await message.answer("❌ Неподдерживаемый тип сообщения")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка отправки: {e}")
+    
+    await state.clear()
+
+
+# ✅ ЭКСПОРТ ЧАТА
+@router.callback_query(lambda c: c.data.startswith("admin_chat_export_"))
+async def admin_chat_export(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    parts = callback.data.split("_")
+    user_id = int(parts[3])
+    chat_id = int(parts[4])
+    
+    async with async_session() as session:
+        messages = await session.scalars(
+            select(SavedMessage)
+            .where(
+                SavedMessage.user_id == user_id,
+                SavedMessage.chat_id == chat_id
+            )
+            .order_by(SavedMessage.saved_at)
+        )
+        messages = list(messages)
+    
+    if not messages:
+        await callback.answer("📭 Нет сообщений для экспорта", show_alert=True)
+        return
+    
+    chat_title = messages[0].chat_title or f"чат_{chat_id}"
+    export_text = f"Экспорт чата: {chat_title}\n"
+    export_text += f"Пользователь: {user_id}\n"
+    export_text += f"Всего сообщений: {len(messages)}\n"
+    export_text += "=" * 50 + "\n\n"
+    
+    for msg in messages:
+        time_str = msg.saved_at.strftime('%Y-%m-%d %H:%M:%S')
+        name = msg.from_username or msg.from_first_name or 'Аноним'
+        export_text += f"[{time_str}] {name}:\n"
+        if msg.text:
+            export_text += f"{msg.text}\n"
+        if msg.media_type:
+            export_text += f"[Медиа: {msg.media_type}]\n"
+        if msg.is_deleted:
+            export_text += "[УДАЛЕНО]\n"
+        if msg.is_edited:
+            export_text += "[ОТРЕДАКТИРОВАНО]\n"
+        export_text += "-" * 30 + "\n"
+    
+    file_data = BufferedInputFile(
+        export_text.encode('utf-8'),
+        filename=f"chat_{user_id}_{chat_id}.txt"
+    )
+    
+    await callback.message.answer_document(
+        document=file_data,
+        caption=f"📄 Экспорт чата {chat_title}\nСообщений: {len(messages)}"
+    )
+    
+    await show_chat_messages(callback.message, user_id, chat_id)
+    await callback.answer()
+
+
+async def send_chat_part(target, text, user_id, chat_id, filter_type, total):
+    """Отправляет часть сообщения с кнопкой продолжения"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="📥 Продолжить",
+                callback_data=f"admin_chat_more_{user_id}_{chat_id}_30"
+            )
+        ]
+    ])
+    await target.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+# ✅ ФИЛЬТР В ЧАТЕ
+@router.callback_query(lambda c: c.data.startswith("admin_chat_filter_"))
+async def admin_chat_filter(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    parts = callback.data.split("_")
+    user_id = int(parts[3])
+    chat_id = int(parts[4])
+    filter_type = parts[5]
+    
+    if filter_type == "all":
+        filter_type = None
+    
+    await show_chat_messages(callback.message, user_id, chat_id, filter_type)
+    await callback.answer()
+
+
+# ✅ ПОКАЗАТЬ ВСЕ МЕДИА В ЧАТЕ
+@router.callback_query(lambda c: c.data.startswith("admin_chat_media_"))
+async def admin_chat_media(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    parts = callback.data.split("_")
+    user_id = int(parts[3])
+    chat_id = int(parts[4])
+    
+    async with async_session() as session:
+        messages = await session.scalars(
+            select(SavedMessage)
+            .where(
+                SavedMessage.user_id == user_id,
+                SavedMessage.chat_id == chat_id,
+                SavedMessage.media_path.isnot(None)
+            )
+            .order_by(SavedMessage.saved_at.desc())
+            .limit(20)
+        )
+        messages = list(messages)
+    
+    if not messages:
+        await callback.answer("📭 Нет медиа в этом чате", show_alert=True)
+        return
+    
+    await callback.message.answer(f"🖼️ <b>Все медиа в чате ({len(messages)})</b>", parse_mode="HTML")
+    
+    for msg in messages:
+        try:
+            if not msg.media_path or not os.path.exists(msg.media_path):
+                continue
+                
+            media_file = FSInputFile(msg.media_path)
+            caption = f"📎 <b>{msg.media_type}</b>\n🕐 {msg.saved_at.strftime('%d.%m.%Y %H:%M')}"
+            
+            if msg.text:
+                caption += f"\n📝 {msg.text[:100]}{'...' if len(msg.text) > 100 else ''}"
+            
+            if msg.is_deleted:
+                caption += "\n🗑️ Удалено"
+            if msg.is_edited:
+                caption += "\n✏️ Отредактировано"
+            
+            if msg.media_type == "photo":
+                await callback.message.answer_photo(photo=media_file, caption=caption, parse_mode="HTML")
+            elif msg.media_type == "video":
+                await callback.message.answer_video(video=media_file, caption=caption, parse_mode="HTML")
+            elif msg.media_type == "document":
+                await callback.message.answer_document(document=media_file, caption=caption, parse_mode="HTML")
+            elif msg.media_type == "audio":
+                await callback.message.answer_audio(audio=media_file, caption=caption, parse_mode="HTML")
+            elif msg.media_type == "voice":
+                await callback.message.answer_voice(voice=media_file, caption=caption, parse_mode="HTML")
+            elif msg.media_type == "sticker":
+                await callback.message.answer_sticker(sticker=media_file)
+            else:
+                await callback.message.answer_document(document=media_file, caption=caption, parse_mode="HTML")
+                
+        except Exception as e:
+            logger.error(f"Ошибка отправки медиа {msg.id}: {e}")
+            continue
+    
+    await show_chat_messages(callback.message, user_id, chat_id)
+    await callback.answer()
 
 
 # ✅ ПОКАЗАТЬ ЕЩЁ СООБЩЕНИЯ
@@ -441,14 +903,18 @@ async def admin_chat_more(callback: CallbackQuery):
     
     parts = callback.data.split("_")
     user_id = int(parts[3])
+    chat_id = int(parts[4])
+    offset = int(parts[5]) if len(parts) > 5 else 30
     
-    # Показываем следующие 30 сообщений
     async with async_session() as session:
         messages = await session.scalars(
             select(SavedMessage)
-            .where(SavedMessage.user_id == user_id)
+            .where(
+                SavedMessage.user_id == user_id,
+                SavedMessage.chat_id == chat_id
+            )
             .order_by(SavedMessage.saved_at.desc())
-            .offset(30)
+            .offset(offset)
             .limit(30)
         )
         messages = list(messages)
@@ -459,7 +925,7 @@ async def admin_chat_more(callback: CallbackQuery):
     
     chat_text = ""
     for msg in reversed(messages):
-        time_str = msg.saved_at.strftime('%H:%M')
+        time_str = msg.saved_at.strftime('%d.%m %H:%M')
         name = msg.from_username or msg.from_first_name or 'Аноним'
         
         if msg.from_user_id == user_id:
@@ -468,8 +934,8 @@ async def admin_chat_more(callback: CallbackQuery):
             chat_text += f"\n🤖 <b>{name}</b> [{time_str}]:\n"
         
         if msg.text:
-            text_preview = msg.text[:500]
-            if len(msg.text) > 500:
+            text_preview = msg.text[:300]
+            if len(msg.text) > 300:
                 text_preview += "..."
             chat_text += f"{text_preview}\n"
         
@@ -482,11 +948,11 @@ async def admin_chat_more(callback: CallbackQuery):
         [
             InlineKeyboardButton(
                 text="📥 Ещё",
-                callback_data=f"admin_chat_more_{user_id}_{int(callback.data.split('_')[-1]) + 30}"
+                callback_data=f"admin_chat_more_{user_id}_{chat_id}_{offset + 30}"
             )
         ],
         [
-            InlineKeyboardButton(text="🔙 Назад к чату", callback_data=f"admin_chat_user_{user_id}")
+            InlineKeyboardButton(text="🔙 Назад к чату", callback_data=f"admin_chat_open_{user_id}_{chat_id}")
         ]
     ])
     
@@ -494,24 +960,197 @@ async def admin_chat_more(callback: CallbackQuery):
     await callback.answer()
 
 
-# ✅ ОЧИСТКА ВСЕХ СООБЩЕНИЙ ПОЛЬЗОВАТЕЛЯ
-@router.callback_query(lambda c: c.data.startswith("admin_chat_clear_"))
-async def admin_chat_clear(callback: CallbackQuery):
+async def show_chat_messages(target, user_id: int, chat_id: int, filter_type: str = None):
+    """Показывает сообщения в конкретном чате с возможностью просмотра медиа"""
+    
+    async with async_session() as session:
+        user = await session.scalar(select(User).where(User.telegram_id == user_id))
+        if not user:
+            await target.answer("❌ Пользователь не найден")
+            return
+        
+        chat_title = await session.scalar(
+            select(SavedMessage.chat_title)
+            .where(
+                SavedMessage.user_id == user_id,
+                SavedMessage.chat_id == chat_id
+            )
+            .limit(1)
+        )
+        
+        stmt = select(SavedMessage).where(
+            SavedMessage.user_id == user_id,
+            SavedMessage.chat_id == chat_id
+        )
+        
+        if filter_type == "deleted":
+            stmt = stmt.where(SavedMessage.is_deleted == True)
+        elif filter_type == "edited":
+            stmt = stmt.where(SavedMessage.is_edited == True)
+        elif filter_type == "media":
+            stmt = stmt.where(SavedMessage.media_path.isnot(None))
+        
+        total_count = await session.scalar(
+            select(func.count()).select_from(stmt.subquery())
+        )
+        
+        messages = await session.scalars(
+            stmt.order_by(SavedMessage.saved_at.desc()).limit(30)
+        )
+        messages = list(messages)
+    
+    chat_title_display = chat_title or f"Чат {chat_id}"
+    
+    filter_text = ""
+    if filter_type == "deleted":
+        filter_text = " 🗑️ (только удаленные)"
+    elif filter_type == "edited":
+        filter_text = " ✏️ (только правки)"
+    elif filter_type == "media":
+        filter_text = " 🖼️ (только медиа)"
+    
+    header = f"""
+💬 <b>Чат: {chat_title_display}</b>{filter_text}
+
+👤 <b>{user.first_name or user.username or 'Пользователь'}</b>
+🆔 <code>{user.telegram_id}</code>
+💬 ID чата: <code>{chat_id}</code>
+📊 <b>Показано:</b> {len(messages)} из {total_count}
+
+➖➖➖➖➖➖➖➖➖➖➖➖
+"""
+    
+    chat_text = header
+    media_items = []
+    
+    for msg in reversed(messages):
+        time_str = msg.saved_at.strftime('%d.%m %H:%M')
+        name = msg.from_username or msg.from_first_name or 'Аноним'
+        
+        if msg.from_user_id == user_id:
+            chat_text += f"\n👤 <b>{name}</b> [{time_str}]:\n"
+        else:
+            chat_text += f"\n🤖 <b>{name}</b> [{time_str}]:\n"
+        
+        if msg.text:
+            text_preview = msg.text[:300]
+            if len(msg.text) > 300:
+                text_preview += "..."
+            chat_text += f"{text_preview}\n"
+        
+        if msg.media_type:
+            media_emoji = {
+                "photo": "🖼️",
+                "video": "🎬",
+                "document": "📄",
+                "audio": "🎵",
+                "voice": "🎤",
+                "sticker": "🎨"
+            }
+            emoji = media_emoji.get(msg.media_type, "📎")
+            chat_text += f"{emoji} <i>[{msg.media_type}]</i>"
+            
+            if msg.media_path and os.path.exists(msg.media_path):
+                chat_text += f" <i>({os.path.getsize(msg.media_path) / 1024:.1f} КБ)</i>"
+                media_items.append(msg)
+        
+        status = []
+        if msg.is_deleted:
+            status.append("🗑️ Удалено")
+        if msg.is_edited:
+            status.append("✏️ Отредактировано")
+        if status:
+            chat_text += f"\n<i>{' '.join(status)}</i>"
+        
+        chat_text += "\n➖➖➖➖➖➖➖➖➖➖\n"
+        
+        if len(chat_text) > 3800:
+            await send_chat_part(target, chat_text, user_id, chat_id, filter_type, len(messages))
+            chat_text = header
+    
+    # Отправляем медиа отдельно
+    if media_items:
+        await target.answer("🖼️ <b>Медиа в этом чате:</b>", parse_mode="HTML")
+        for msg in media_items[:10]:
+            try:
+                media_file = FSInputFile(msg.media_path)
+                caption = f"📎 <b>{msg.media_type}</b>\n🕐 {msg.saved_at.strftime('%d.%m.%Y %H:%M')}"
+                
+                if msg.text:
+                    caption += f"\n📝 {msg.text[:100]}{'...' if len(msg.text) > 100 else ''}"
+                
+                if msg.media_type == "photo":
+                    await target.answer_photo(photo=media_file, caption=caption, parse_mode="HTML")
+                elif msg.media_type == "video":
+                    await target.answer_video(video=media_file, caption=caption, parse_mode="HTML")
+                elif msg.media_type == "document":
+                    await target.answer_document(document=media_file, caption=caption, parse_mode="HTML")
+                elif msg.media_type == "audio":
+                    await target.answer_audio(audio=media_file, caption=caption, parse_mode="HTML")
+                elif msg.media_type == "voice":
+                    await target.answer_voice(voice=media_file, caption=caption, parse_mode="HTML")
+                elif msg.media_type == "sticker":
+                    await target.answer_sticker(sticker=media_file)
+                else:
+                    await target.answer_document(document=media_file, caption=caption, parse_mode="HTML")
+            except Exception as e:
+                logger.error(f"Ошибка отправки медиа {msg.id}: {e}")
+    
+    # Отправляем последнюю часть с кнопками
+    keyboard_buttons = [
+        [
+            InlineKeyboardButton(text="🔄 Обновить", callback_data=f"admin_chat_open_{user_id}_{chat_id}"),
+            InlineKeyboardButton(text="🗑️ Удалить чат", callback_data=f"admin_chat_delete_{user_id}_{chat_id}")
+        ],
+        [
+            InlineKeyboardButton(text="📨 Отправить сообщение", callback_data=f"admin_chat_send_{user_id}_{chat_id}"),
+            InlineKeyboardButton(text="📄 Экспорт", callback_data=f"admin_chat_export_{user_id}_{chat_id}")
+        ],
+        [
+            InlineKeyboardButton(text="🖼️ Все медиа", callback_data=f"admin_chat_media_{user_id}_{chat_id}"),
+            InlineKeyboardButton(text="📥 Показать ещё", callback_data=f"admin_chat_more_{user_id}_{chat_id}_{30}")
+        ],
+        [
+            InlineKeyboardButton(text="📝 Все", callback_data=f"admin_chat_filter_{user_id}_{chat_id}_all"),
+            InlineKeyboardButton(text="🗑️ Удаленные", callback_data=f"admin_chat_filter_{user_id}_{chat_id}_deleted")
+        ],
+        [
+            InlineKeyboardButton(text="✏️ Правки", callback_data=f"admin_chat_filter_{user_id}_{chat_id}_edited"),
+            InlineKeyboardButton(text="🖼️ Медиа", callback_data=f"admin_chat_filter_{user_id}_{chat_id}_media")
+        ],
+        [
+            InlineKeyboardButton(text="💬 Список чатов", callback_data=f"admin_chats_user_{user_id}"),
+            InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")
+        ]
+    ]
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    await target.answer(chat_text, reply_markup=keyboard, parse_mode="HTML")
+
+
+# ✅ УДАЛИТЬ ВЕСЬ ЧАТ
+@router.callback_query(lambda c: c.data.startswith("admin_chat_delete_"))
+async def admin_chat_delete(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    user_id = int(callback.data.split("_")[-1])
+    parts = callback.data.split("_")
+    user_id = int(parts[3])
+    chat_id = int(parts[4])
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Да, удалить всё", callback_data=f"admin_chat_clear_confirm_{user_id}"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin_chat_user_{user_id}")
+            InlineKeyboardButton(text="✅ Да, удалить чат", callback_data=f"admin_chat_delete_confirm_{user_id}_{chat_id}"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin_chat_open_{user_id}_{chat_id}")
         ]
     ])
     
     await callback.message.edit_text(
-        f"⚠️ <b>Удалить все сообщения пользователя {user_id}?</b>\n\n"
+        f"⚠️ <b>Удалить весь чат?</b>\n\n"
+        f"Пользователь: {user_id}\n"
+        f"Чат: {chat_id}\n\n"
         f"Это действие необратимо!",
         reply_markup=keyboard,
         parse_mode="HTML"
@@ -519,23 +1158,26 @@ async def admin_chat_clear(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(lambda c: c.data.startswith("admin_chat_clear_confirm_"))
-async def admin_chat_clear_confirm(callback: CallbackQuery):
+@router.callback_query(lambda c: c.data.startswith("admin_chat_delete_confirm_"))
+async def admin_chat_delete_confirm(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    user_id = int(callback.data.split("_")[-1])
+    parts = callback.data.split("_")
+    user_id = int(parts[4])
+    chat_id = int(parts[5])
     
     async with async_session() as session:
-        # Удаляем все сообщения пользователя
         messages = await session.scalars(
-            select(SavedMessage).where(SavedMessage.user_id == user_id)
+            select(SavedMessage).where(
+                SavedMessage.user_id == user_id,
+                SavedMessage.chat_id == chat_id
+            )
         )
         
         deleted_count = 0
         for msg in messages:
-            # Удаляем медиа-файлы
             if msg.media_path and os.path.exists(msg.media_path):
                 try:
                     os.remove(msg.media_path)
@@ -547,8 +1189,9 @@ async def admin_chat_clear_confirm(callback: CallbackQuery):
         await session.commit()
     
     await callback.message.edit_text(
-        f"✅ Удалено {deleted_count} сообщений пользователя {user_id}",
+        f"✅ Удалено {deleted_count} сообщений из чата {chat_id}",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Список чатов", callback_data=f"admin_chats_user_{user_id}")],
             [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
         ]),
         parse_mode="HTML"
@@ -556,7 +1199,7 @@ async def admin_chat_clear_confirm(callback: CallbackQuery):
     await callback.answer()
 
 
-# ✅ БАН ПОЛЬЗОВАТЕЛЯ ИЗ ПОИСКА
+# ✅ БАН ПОЛЬЗОВАТЕЛЯ
 @router.callback_query(lambda c: c.data.startswith("admin_ban_user_"))
 async def admin_ban_user(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
@@ -570,11 +1213,9 @@ async def admin_ban_user(callback: CallbackQuery):
         await callback.answer(f"✅ Пользователь {user_id} заблокирован!", show_alert=True)
     else:
         await callback.answer(f"❌ Пользователь {user_id} не найден!", show_alert=True)
-    
-    await show_chat_interface(callback.message, user_id)
 
 
-# ✅ РАЗБАН ПОЛЬЗОВАТЕЛЯ ИЗ ПОИСКА
+# ✅ РАЗБАН ПОЛЬЗОВАТЕЛЯ
 @router.callback_query(lambda c: c.data.startswith("admin_unban_user_"))
 async def admin_unban_user(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
@@ -588,8 +1229,6 @@ async def admin_unban_user(callback: CallbackQuery):
         await callback.answer(f"✅ Пользователь {user_id} разблокирован!", show_alert=True)
     else:
         await callback.answer(f"❌ Пользователь {user_id} не найден!", show_alert=True)
-    
-    await show_chat_interface(callback.message, user_id)
 
 
 # ✅ БАН
