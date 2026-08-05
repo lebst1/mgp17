@@ -162,7 +162,6 @@ async def send_main_menu(target, user, has_business):
 
 @router.message(Command("start"))
 async def start_command(message: Message):
-    # ✅ ПРОВЕРЯЕМ РЕФЕРАЛЬНУЮ ССЫЛКУ
     args = message.text.split()
     referrer_id = None
     
@@ -172,7 +171,6 @@ async def start_command(message: Message):
         except ValueError:
             pass
     
-    # Создаем пользователя
     user = await UserRepository.get_or_create(
         telegram_id=message.from_user.id,
         username=message.from_user.username,
@@ -187,14 +185,45 @@ async def start_command(message: Message):
             referred_id=message.from_user.id
         )
         if success:
+            # ✅ Получаем обновленную подписку для нового пользователя
+            subscription = await SubscriptionRepository.get_or_create_subscription(message.from_user.id)
+            days_left = (subscription.expires_at - datetime.utcnow()).days if subscription.expires_at else 0
+            
             await message.answer(
-                "🎉 <b>Реферал активирован!</b>\n\n"
-                "Твой друг получил +5 дней подписки!\n"
-                "А ты тоже получаешь 1 день бесплатно!",
+                f"🎉 <b>Реферал активирован!</b>\n\n"
+                f"Твой друг получил +3 дня подписки!\n"
+                f"А ты тоже получаешь 1 день бесплатно!\n\n"
+                f"📊 <b>Твой баланс:</b> {days_left} дней",
                 parse_mode="HTML"
             )
+            
+            # ✅ УВЕДОМЛЕНИЕ РЕФЕРЕРУ
+            try:
+                from aiogram import Bot
+                bot = Bot(token=settings.BOT_TOKEN)
+                
+                # Получаем информацию о реферере
+                referrer_user = await UserRepository.get_by_id(referrer_id)
+                referrer_name = referrer_user.first_name or referrer_user.username or "Пользователь" if referrer_user else "Пользователь"
+                
+                # Получаем обновленную подписку реферера
+                referrer_sub = await SubscriptionRepository.get_or_create_subscription(referrer_id)
+                referrer_days = (referrer_sub.expires_at - datetime.utcnow()).days if referrer_sub.expires_at else 0
+                
+                await bot.send_message(
+                    chat_id=referrer_id,
+                    text=f"🎉 <b>По вашей реферальной ссылке перешел новый пользователь!</b>\n\n"
+                         f"👤 <b>{message.from_user.first_name or 'Пользователь'}</b>\n"
+                         f"📛 @{message.from_user.username or 'Нет юзернейма'}\n\n"
+                         f"✅ Вы получили <b>+3 дня</b> бесплатной подписки!\n"
+                         f"📊 Теперь у вас <b>{referrer_days} дней</b>",
+                    parse_mode="HTML"
+                )
+                await bot.session.close()
+            except Exception as e:
+                logger.error(f"Ошибка отправки уведомления рефереру: {e}")
     
-    # Создаем подписку
+    # ✅ СОЗДАЕМ ПОДПИСКУ (если её нет)
     subscription = await SubscriptionRepository.get_or_create_subscription(message.from_user.id)
     
     connections = await BusinessRepository.get_user_connections(message.from_user.id)
