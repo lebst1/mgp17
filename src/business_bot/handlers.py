@@ -127,10 +127,10 @@ async def handle_business_message(message: Message):
         logger.error(f"❌ Ошибка сохранения сообщения: {e}")
 
 
-# ✅ УДАЛЕННЫЕ СООБЩЕНИЯ
+# ✅ УДАЛЕННЫЕ СООБЩЕНИЯ — С УВЕДОМЛЕНИЕМ ВСЕМ ПОЛЬЗОВАТЕЛЯМ
 @router.message(F.business_connection_id.is_not(None))
-async def handle_business_deleted(message: Message):
-    """Обработчик удаленных сообщений"""
+async def handle_business_deleted(message: Message, bot: Bot):
+    """Обработчик удаленных сообщений с отправкой уведомления владельцу"""
     # Проверяем, что это именно удаление (нет текста и нет медиа)
     if message.text or message.caption or message.photo or message.video or message.document:
         return
@@ -154,6 +154,7 @@ async def handle_business_deleted(message: Message):
     
     logger.info(f"🗑 Удалено сообщение {message.message_id} в чате {message.chat.id} от {user.telegram_id}")
     
+    # ✅ ПОМЕЧАЕМ КАК УДАЛЕННОЕ В БД
     try:
         await MessageRepository.mark_as_deleted(
             message_id=message.message_id,
@@ -163,6 +164,38 @@ async def handle_business_deleted(message: Message):
         logger.info(f"✅ Сообщение {message.message_id} отмечено как удаленное")
     except Exception as e:
         logger.error(f"❌ Ошибка обработки удаления: {e}")
+    
+    # ✅ ОТПРАВЛЯЕМ УВЕДОМЛЕНИЕ ВЛАДЕЛЬЦУ В ЛС
+    try:
+        # Получаем сохраненное сообщение из БД
+        saved_msg = await MessageRepository.get_by_id(
+            message_id=message.message_id,
+            user_id=user.telegram_id
+        )
+        
+        if saved_msg:
+            # Формируем текст уведомления
+            notification_text = f"🗑 <b>Удалено сообщение</b>\n\n"
+            notification_text += f"📌 <b>Чат:</b> {saved_msg.chat_title or saved_msg.chat_id}\n"
+            if saved_msg.from_username:
+                notification_text += f"👤 <b>От:</b> @{saved_msg.from_username}\n"
+            if saved_msg.text:
+                notification_text += f"📝 <b>Текст:</b>\n{saved_msg.text}\n"
+            if saved_msg.media_type:
+                notification_text += f"🖼️ <b>Медиа:</b> {saved_msg.media_type}\n"
+            notification_text += f"🕐 <b>Время:</b> {saved_msg.saved_at.strftime('%d.%m.%Y %H:%M:%S')}"
+            
+            # Отправляем в ЛС владельцу
+            await bot.send_message(
+                chat_id=user.telegram_id,
+                text=notification_text,
+                parse_mode="HTML"
+            )
+            logger.info(f"✅ Уведомление об удалении отправлено пользователю {user.telegram_id}")
+        else:
+            logger.warning(f"⚠️ Сообщение {message.message_id} не найдено в БД для отправки уведомления")
+    except Exception as e:
+        logger.error(f"❌ Ошибка отправки уведомления: {e}")
 
 
 # ✅ ОТРЕДАКТИРОВАННЫЕ СООБЩЕНИЯ
