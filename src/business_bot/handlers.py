@@ -121,8 +121,8 @@ async def handle_business_message(message: Message):
         logger.error(f"❌ Ошибка сохранения сообщения: {e}")
 
 
-# ✅ ПРАВИЛЬНЫЙ ОБРАБОТЧИК УДАЛЕННЫХ СООБЩЕНИЙ
-@router.business_messages_deleted()
+# ✅ ПРАВИЛЬНЫЙ ОБРАБОТЧИК УДАЛЕННЫХ СООБЩЕНИЙ (через обсервер)
+@router.deleted_business_messages()
 async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
     """Обработчик удаленных бизнес-сообщений"""
     logger.info(f"🔍 Получено удаление бизнес-сообщений!")
