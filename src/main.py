@@ -33,7 +33,6 @@ logger = logging.getLogger(__name__)
 
 
 async def setup_dispatcher(bot: Bot) -> Dispatcher:
-    """Настройка диспетчера"""
     dp = Dispatcher()
     
     dp.message.middleware(AuthMiddleware(bot))

@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
+# ✅ ОБРАБОТЧИК ПРОВЕРКИ ПОДПИСКИ
 @router.callback_query(lambda c: c.data == "check_subscription")
 async def check_subscription(callback: CallbackQuery, bot: Bot):
     user_id = callback.from_user.id

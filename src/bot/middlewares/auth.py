@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class AuthMiddleware(BaseMiddleware):
-    """Middleware для проверки авторизации и подписки"""
+    """Middleware для проверки подписки"""
     
     def __init__(self, bot: Bot):
         self.bot = bot
@@ -27,12 +27,10 @@ class AuthMiddleware(BaseMiddleware):
         user_id = event.from_user.id
         
         if not await UserRepository.check_access(user_id):
-            await event.answer(
-                "⛔ У вас нет доступа к этому боту.\n"
-                "Обратитесь к администратору."
-            )
+            await event.answer("⛔ У вас нет доступа к этому боту.")
             return
         
+        # ✅ ПРОВЕРЯЕМ ПОДПИСКУ
         if settings.REQUIRED_CHANNEL_ID and settings.REQUIRED_CHANNEL_URL:
             try:
                 member = await self.bot.get_chat_member(
@@ -59,7 +57,7 @@ class AuthMiddleware(BaseMiddleware):
                     await event.answer(
                         f"📢 <b>Подпишитесь на наш канал!</b>\n\n"
                         f"Для использования бота необходимо подписаться на канал:\n"
-                        f"{settings.REQUIRED_CHANNEL_URL}\n\n"
+                        f"<a href='{settings.REQUIRED_CHANNEL_URL}'>{settings.REQUIRED_CHANNEL_URL}</a>\n\n"
                         f"После подписки нажмите «Проверить подписку».",
                         reply_markup=keyboard,
                         parse_mode="HTML"
