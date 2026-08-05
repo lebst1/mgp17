@@ -20,9 +20,8 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
-# ✅ ЛИМИТЫ
-MAX_MEDIA_FILES = 50  # Максимум медиа в БД
-MAX_MEDIA_AGE_DAYS = 1  # Хранить медиа 1
+MAX_MEDIA_FILES = 50
+MAX_MEDIA_AGE_DAYS = 1
 
 
 # ✅ СОСТОЯНИЯ ДЛЯ FSM
@@ -32,6 +31,7 @@ class AdminStates(StatesGroup):
     waiting_for_search = State()
     waiting_for_user_messages = State()
     waiting_for_view_media = State()
+    waiting_for_chat_view = State()
 
 
 # ✅ ПРОВЕРКА АДМИНА
@@ -55,7 +55,7 @@ async def show_admin_panel(target):
 🚫 <b>Бан</b> — заблокировать пользователя
 ✅ <b>Разбан</b> — разблокировать пользователя
 📋 <b>Список пользователей</b> — все пользователи
-📝 <b>Сообщения пользователя</b> — просмотр удаленных/правок
+💬 <b>Чат пользователя</b> — просмотр переписки
 🗑️ <b>Очистка БД</b> — удалить старые данные
 💾 <b>Бэкап</b> — создать бэкап
 💚 <b>Статус</b> — состояние бота
@@ -77,7 +77,7 @@ async def show_admin_panel(target):
             InlineKeyboardButton(text="📋 Список пользователей", callback_data="admin_users")
         ],
         [
-            InlineKeyboardButton(text="📝 Сообщения пользователя", callback_data="admin_user_messages")
+            InlineKeyboardButton(text="💬 Чат пользователя", callback_data="admin_chat")
         ],
         [
             InlineKeyboardButton(text="🗑️ Очистка БД", callback_data="admin_cleanup"),
@@ -271,7 +271,7 @@ async def process_search(message: Message, state: FSMContext):
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📝 Смотреть сообщения", callback_data=f"admin_view_user_{user.telegram_id}")
+            InlineKeyboardButton(text="💬 Открыть чат", callback_data=f"admin_chat_user_{user.telegram_id}")
         ],
         [
             InlineKeyboardButton(text="🚫 Забанить", callback_data=f"admin_ban_user_{user.telegram_id}"),
@@ -286,198 +286,273 @@ async def process_search(message: Message, state: FSMContext):
     await state.clear()
 
 
-# ✅ ПРОСМОТР СООБЩЕНИЙ ПОЛЬЗОВАТЕЛЯ
-@router.callback_query(lambda c: c.data.startswith("admin_view_user_"))
-async def admin_view_user_messages(callback: CallbackQuery, state: FSMContext):
+# ✅ ЧАТ ПОЛЬЗОВАТЕЛЯ (НОВЫЙ ИНТЕРФЕЙС)
+@router.callback_query(lambda c: c.data == "admin_chat")
+async def admin_chat(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await callback.message.edit_text(
+        "💬 <b>Чат пользователя</b>\n\n"
+        "Отправь ID пользователя, чей чат хочешь посмотреть.\n\n"
+        "Отправь /cancel чтобы отменить.",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminStates.waiting_for_chat_view)
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_for_chat_view)
+async def process_chat_view(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        await message.answer("⛔ Доступ запрещен")
+        await state.clear()
+        return
+    
+    try:
+        user_id = int(message.text.strip())
+        await show_chat_interface(message, user_id)
+    except ValueError:
+        await message.answer("❌ Неверный формат. Отправь числовой ID.")
+    
+    await state.clear()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin_chat_user_"))
+async def admin_chat_user(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    user_id = int(callback.data.split("_")[-1])
+    await show_chat_interface(callback.message, user_id)
+    await callback.answer()
+
+
+async def show_chat_interface(target, user_id: int):
+    """Показывает чат пользователя в виде диалога"""
+    
+    async with async_session() as session:
+        # Получаем пользователя
+        user = await session.scalar(select(User).where(User.telegram_id == user_id))
+        if not user:
+            await target.answer("❌ Пользователь не найден")
+            return
+        
+        # Получаем сообщения пользователя (последние 30)
+        messages = await session.scalars(
+            select(SavedMessage)
+            .where(SavedMessage.user_id == user_id)
+            .order_by(SavedMessage.saved_at.desc())
+            .limit(30)
+        )
+        messages = list(messages)
+    
+    # Формируем заголовок чата
+    header = f"""
+💬 <b>Чат пользователя</b>
+
+👤 <b>{user.first_name or user.username or 'Пользователь'}</b>
+🆔 <code>{user.telegram_id}</code>
+📊 <b>Всего сообщений:</b> {len(messages)}
+📅 <b>Активен:</b> {'✅ Да' if user.is_active else '❌ Нет'}
+
+➖➖➖➖➖➖➖➖➖➖➖➖
+"""
+    
+    # Формируем сообщения как в чате
+    chat_text = header
+    for msg in reversed(messages):  # От старых к новым
+        time_str = msg.saved_at.strftime('%H:%M')
+        name = msg.from_username or msg.from_first_name or 'Аноним'
+        
+        # Определяем, чье сообщение
+        if msg.from_user_id == user.telegram_id:
+            # Сообщение пользователя
+            chat_text += f"\n👤 <b>{name}</b> [{time_str}]:\n"
+        else:
+            # Сообщение от другого пользователя
+            chat_text += f"\n🤖 <b>{name}</b> [{time_str}]:\n"
+        
+        # Текст сообщения
+        if msg.text:
+            text_preview = msg.text[:500]
+            if len(msg.text) > 500:
+                text_preview += "..."
+            chat_text += f"{text_preview}\n"
+        
+        # Медиа
+        if msg.media_type:
+            chat_text += f"🖼️ <i>[{msg.media_type}]</i>\n"
+        
+        # Статус
+        status = []
+        if msg.is_deleted:
+            status.append("🗑️ Удалено")
+        if msg.is_edited:
+            status.append("✏️ Отредактировано")
+        if status:
+            chat_text += f"<i>{' '.join(status)}</i>\n"
+        
+        chat_text += "➖➖➖➖➖➖➖➖➖➖\n"
+        
+        # Если текст слишком длинный — разбиваем
+        if len(chat_text) > 3800:
+            # Отправляем текущую часть
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="📥 Показать ещё",
+                        callback_data=f"admin_chat_more_{user_id}_{len(messages)}"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")
+                ]
+            ])
+            await target.answer(chat_text, reply_markup=keyboard, parse_mode="HTML")
+            chat_text = header  # Сбрасываем для следующей части
+    
+    # Отправляем последнюю часть
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔄 Обновить", callback_data=f"admin_chat_user_{user_id}"),
+            InlineKeyboardButton(text="🗑️ Удалить всё", callback_data=f"admin_chat_clear_{user_id}")
+        ],
+        [
+            InlineKeyboardButton(text="🚫 Забанить", callback_data=f"admin_ban_user_{user_id}"),
+            InlineKeyboardButton(text="✅ Разбанить", callback_data=f"admin_unban_user_{user_id}")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")
+        ]
+    ])
+    
+    await target.answer(chat_text, reply_markup=keyboard, parse_mode="HTML")
+
+
+# ✅ ПОКАЗАТЬ ЕЩЁ СООБЩЕНИЯ
+@router.callback_query(lambda c: c.data.startswith("admin_chat_more_"))
+async def admin_chat_more(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    parts = callback.data.split("_")
+    user_id = int(parts[3])
+    
+    # Показываем следующие 30 сообщений
+    async with async_session() as session:
+        messages = await session.scalars(
+            select(SavedMessage)
+            .where(SavedMessage.user_id == user_id)
+            .order_by(SavedMessage.saved_at.desc())
+            .offset(30)
+            .limit(30)
+        )
+        messages = list(messages)
+    
+    if not messages:
+        await callback.answer("📭 Больше сообщений нет", show_alert=True)
+        return
+    
+    chat_text = ""
+    for msg in reversed(messages):
+        time_str = msg.saved_at.strftime('%H:%M')
+        name = msg.from_username or msg.from_first_name or 'Аноним'
+        
+        if msg.from_user_id == user_id:
+            chat_text += f"\n👤 <b>{name}</b> [{time_str}]:\n"
+        else:
+            chat_text += f"\n🤖 <b>{name}</b> [{time_str}]:\n"
+        
+        if msg.text:
+            text_preview = msg.text[:500]
+            if len(msg.text) > 500:
+                text_preview += "..."
+            chat_text += f"{text_preview}\n"
+        
+        if msg.media_type:
+            chat_text += f"🖼️ <i>[{msg.media_type}]</i>\n"
+        
+        chat_text += "➖➖➖➖➖➖➖➖➖➖\n"
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="📥 Ещё",
+                callback_data=f"admin_chat_more_{user_id}_{int(callback.data.split('_')[-1]) + 30}"
+            )
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Назад к чату", callback_data=f"admin_chat_user_{user_id}")
+        ]
+    ])
+    
+    await callback.message.answer(chat_text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+# ✅ ОЧИСТКА ВСЕХ СООБЩЕНИЙ ПОЛЬЗОВАТЕЛЯ
+@router.callback_query(lambda c: c.data.startswith("admin_chat_clear_"))
+async def admin_chat_clear(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
     user_id = int(callback.data.split("_")[-1])
     
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Да, удалить всё", callback_data=f"admin_chat_clear_confirm_{user_id}"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin_chat_user_{user_id}")
+        ]
+    ])
+    
     await callback.message.edit_text(
-        f"📝 <b>Сообщения пользователя {user_id}</b>\n\n"
-        "Отправь:\n"
-        "• <code>deleted</code> — показать удаленные сообщения\n"
-        "• <code>edited</code> — показать отредактированные сообщения\n"
-        "• <code>media</code> — показать сообщения с медиа\n"
-        "• <code>all</code> — показать все сообщения\n\n"
-        "Или отправь количество сообщений (например, 10).\n\n"
-        "Отправь /cancel чтобы отменить.",
+        f"⚠️ <b>Удалить все сообщения пользователя {user_id}?</b>\n\n"
+        f"Это действие необратимо!",
+        reply_markup=keyboard,
         parse_mode="HTML"
     )
-    await state.set_state(AdminStates.waiting_for_user_messages)
-    await state.update_data(user_id=user_id)
     await callback.answer()
 
 
-@router.message(AdminStates.waiting_for_user_messages)
-async def process_user_messages(message: Message, state: FSMContext):
-    if not await is_admin(message.from_user.id):
-        await message.answer("⛔ Доступ запрещен")
-        await state.clear()
-        return
-    
-    data = await state.get_data()
-    user_id = data.get('user_id')
-    query = message.text.strip().lower()
-    
-    async with async_session() as session:
-        stmt = select(SavedMessage).where(SavedMessage.user_id == user_id)
-        
-        if query == "deleted":
-            stmt = stmt.where(SavedMessage.is_deleted == True)
-            title = "🗑️ Удаленные сообщения"
-        elif query == "edited":
-            stmt = stmt.where(SavedMessage.is_edited == True)
-            title = "✏️ Отредактированные сообщения"
-        elif query == "media":
-            stmt = stmt.where(SavedMessage.media_path.isnot(None))
-            title = "🖼️ Сообщения с медиа"
-        elif query == "all":
-            title = "📝 Все сообщения"
-        elif query.isdigit():
-            limit = int(query)
-            stmt = stmt.order_by(SavedMessage.saved_at.desc()).limit(limit)
-            title = f"📝 Последние {limit} сообщений"
-        else:
-            await message.answer("❌ Неверный запрос. Используй: deleted, edited, media, all или число.")
-            return
-        
-        if query in ["deleted", "edited", "media", "all"]:
-            stmt = stmt.order_by(SavedMessage.saved_at.desc()).limit(20)
-        
-        messages = await session.scalars(stmt)
-        messages = list(messages)
-    
-    if not messages:
-        await message.answer(f"📭 Нет сообщений для этого запроса.")
-        await state.clear()
-        return
-    
-    for msg in messages:
-        # Формируем текст для каждого сообщения
-        text = f"""
-<b>ID:</b> {msg.message_id}
-📌 <b>Чат:</b> {msg.chat_title or msg.chat_id}
-👤 <b>От:</b> @{msg.from_username or 'неизвестно'}
-🕐 <b>Время:</b> {msg.saved_at.strftime('%d.%m.%Y %H:%M:%S')}
-📝 <b>Текст:</b> {msg.text[:200] + '...' if msg.text and len(msg.text) > 200 else msg.text or 'Нет текста'}
-{'🗑️ Удалено' if msg.is_deleted else ''}
-{'✏️ Отредактировано' if msg.is_edited else ''}
-{'🖼️ Медиа: ' + msg.media_type if msg.media_type else ''}
-"""
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="🖼️ Показать медиа",
-                    callback_data=f"admin_show_media_{msg.id}"
-                )
-            ]
-        ]) if msg.media_path and os.path.exists(msg.media_path) else None
-        
-        if keyboard:
-            await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
-        else:
-            await message.answer(text, parse_mode="HTML")
-    
-    await state.clear()
-
-
-# ✅ ПОКАЗАТЬ МЕДИА
-@router.callback_query(lambda c: c.data.startswith("admin_show_media_"))
-async def admin_show_media(callback: CallbackQuery):
+@router.callback_query(lambda c: c.data.startswith("admin_chat_clear_confirm_"))
+async def admin_chat_clear_confirm(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    msg_id = int(callback.data.split("_")[-1])
+    user_id = int(callback.data.split("_")[-1])
     
     async with async_session() as session:
-        msg = await session.scalar(select(SavedMessage).where(SavedMessage.id == msg_id))
+        # Удаляем все сообщения пользователя
+        messages = await session.scalars(
+            select(SavedMessage).where(SavedMessage.user_id == user_id)
+        )
         
-        if not msg or not msg.media_path or not os.path.exists(msg.media_path):
-            await callback.answer("❌ Медиа не найдено", show_alert=True)
-            return
+        deleted_count = 0
+        for msg in messages:
+            # Удаляем медиа-файлы
+            if msg.media_path and os.path.exists(msg.media_path):
+                try:
+                    os.remove(msg.media_path)
+                except:
+                    pass
+            await session.delete(msg)
+            deleted_count += 1
         
-        try:
-            media_file = FSInputFile(msg.media_path)
-            
-            if msg.media_type == "photo":
-                await callback.message.answer_photo(photo=media_file)
-            elif msg.media_type == "video":
-                await callback.message.answer_video(video=media_file)
-            elif msg.media_type in ["document", "file"]:
-                await callback.message.answer_document(document=media_file)
-            elif msg.media_type == "audio":
-                await callback.message.answer_audio(audio=media_file)
-            elif msg.media_type == "voice":
-                await callback.message.answer_voice(voice=media_file)
-            else:
-                await callback.message.answer_document(document=media_file)
-            
-            # ✅ ОБНОВЛЯЕМ ВРЕМЯ ПОСЛЕДНЕГО ПРОСМОТРА
-            # (чтобы не удалять недавно просмотренные)
-            
-        except Exception as e:
-            await callback.answer(f"❌ Ошибка: {e}", show_alert=True)
-    
-    await callback.answer()
-
-
-# ✅ ОЧИСТКА СТАРЫХ МЕДИА
-async def cleanup_old_media():
-    """Удаляет медиа старше 1 дня"""
-    try:
-        async with async_session() as session:
-            # Удаляем медиа старше 1 дня
-            cutoff_date = datetime.utcnow() - timedelta(days=MAX_MEDIA_AGE_DAYS)
-            
-            media = await session.scalars(
-                select(SavedMessage)
-                .where(
-                    SavedMessage.media_path.isnot(None),
-                    SavedMessage.saved_at < cutoff_date
-                )
-            )
-            
-            deleted_count = 0
-            for msg in media:
-                if msg.media_path and os.path.exists(msg.media_path):
-                    try:
-                        os.remove(msg.media_path)
-                        logger.info(f"🗑️ Удалён старый медиа-файл: {msg.media_path}")
-                    except Exception as e:
-                        logger.error(f"Ошибка удаления медиа: {e}")
-                
-                msg.media_path = None
-                msg.media_type = None
-                msg.media_file_id = None
-                msg.media_size = None
-                await session.merge(msg)
-                deleted_count += 1
-            
-            await session.commit()
-            logger.info(f"✅ Удалено {deleted_count} старых медиа (старше {MAX_MEDIA_AGE_DAYS} дня)")
-            
-    except Exception as e:
-        logger.error(f"Ошибка очистки медиа: {e}")
-
-# ✅ БАН
-@router.callback_query(lambda c: c.data == "admin_ban")
-async def admin_ban(callback: CallbackQuery, state: FSMContext):
-    if not await is_admin(callback.from_user.id):
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
+        await session.commit()
     
     await callback.message.edit_text(
-        "🚫 <b>Бан пользователя</b>\n\n"
-        "Отправь ID пользователя, которого нужно заблокировать.\n\n"
-        "Отправь /cancel чтобы отменить.",
+        f"✅ Удалено {deleted_count} сообщений пользователя {user_id}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
+        ]),
         parse_mode="HTML"
     )
-    await state.set_state(AdminStates.waiting_for_user_id)
     await callback.answer()
 
 
@@ -496,7 +571,7 @@ async def admin_ban_user(callback: CallbackQuery):
     else:
         await callback.answer(f"❌ Пользователь {user_id} не найден!", show_alert=True)
     
-    await show_user_info(callback, user_id)
+    await show_chat_interface(callback.message, user_id)
 
 
 # ✅ РАЗБАН ПОЛЬЗОВАТЕЛЯ ИЗ ПОИСКА
@@ -514,56 +589,23 @@ async def admin_unban_user(callback: CallbackQuery):
     else:
         await callback.answer(f"❌ Пользователь {user_id} не найден!", show_alert=True)
     
-    await show_user_info(callback, user_id)
+    await show_chat_interface(callback.message, user_id)
 
 
-# ✅ НАЗАД К ПОЛЬЗОВАТЕЛЮ
-@router.callback_query(lambda c: c.data.startswith("admin_back_to_user_"))
-async def admin_back_to_user(callback: CallbackQuery):
+# ✅ БАН
+@router.callback_query(lambda c: c.data == "admin_ban")
+async def admin_ban(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    user_id = int(callback.data.split("_")[-1])
-    await show_user_info(callback, user_id)
-
-
-async def show_user_info(callback: CallbackQuery, user_id: int):
-    """Показывает информацию о пользователе"""
-    async with async_session() as session:
-        user = await session.scalar(select(User).where(User.telegram_id == user_id))
-        if not user:
-            await callback.message.edit_text("❌ Пользователь не найден")
-            return
-        
-        messages_count = await session.scalar(
-            select(func.count()).select_from(SavedMessage).where(SavedMessage.user_id == user.telegram_id)
-        )
-    
-    text = f"""
-👤 <b>Пользователь</b>
-
-🆔 ID: <code>{user.telegram_id}</code>
-👤 Имя: {user.first_name or 'Не указано'}
-📛 Юзернейм: @{user.username or 'Нет'}
-✅ Активен: {'Да' if user.is_active else 'Нет'}
-📝 Сообщений: {messages_count or 0}
-"""
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="📝 Смотреть сообщения", callback_data=f"admin_view_user_{user.telegram_id}")
-        ],
-        [
-            InlineKeyboardButton(text="🚫 Забанить", callback_data=f"admin_ban_user_{user.telegram_id}"),
-            InlineKeyboardButton(text="✅ Разбанить", callback_data=f"admin_unban_user_{user.telegram_id}")
-        ],
-        [
-            InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")
-        ]
-    ])
-    
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.message.edit_text(
+        "🚫 <b>Бан пользователя</b>\n\n"
+        "Отправь ID пользователя, которого нужно заблокировать.\n\n"
+        "Отправь /cancel чтобы отменить.",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminStates.waiting_for_user_id)
     await callback.answer()
 
 
@@ -630,6 +672,43 @@ async def admin_users(callback: CallbackQuery):
     await callback.answer()
 
 
+# ✅ ОЧИСТКА СТАРЫХ МЕДИА
+async def cleanup_old_media():
+    try:
+        async with async_session() as session:
+            cutoff_date = datetime.utcnow() - timedelta(days=MAX_MEDIA_AGE_DAYS)
+            
+            media = await session.scalars(
+                select(SavedMessage)
+                .where(
+                    SavedMessage.media_path.isnot(None),
+                    SavedMessage.saved_at < cutoff_date
+                )
+            )
+            
+            deleted_count = 0
+            for msg in media:
+                if msg.media_path and os.path.exists(msg.media_path):
+                    try:
+                        os.remove(msg.media_path)
+                        logger.info(f"🗑️ Удалён старый медиа-файл: {msg.media_path}")
+                    except Exception as e:
+                        logger.error(f"Ошибка удаления медиа: {e}")
+                
+                msg.media_path = None
+                msg.media_type = None
+                msg.media_file_id = None
+                msg.media_size = None
+                await session.merge(msg)
+                deleted_count += 1
+            
+            await session.commit()
+            logger.info(f"✅ Удалено {deleted_count} старых медиа (старше {MAX_MEDIA_AGE_DAYS} дня)")
+            
+    except Exception as e:
+        logger.error(f"Ошибка очистки медиа: {e}")
+
+
 # ✅ ОЧИСТКА БД
 @router.callback_query(lambda c: c.data == "admin_cleanup")
 async def admin_cleanup(callback: CallbackQuery):
@@ -641,7 +720,7 @@ async def admin_cleanup(callback: CallbackQuery):
     
     try:
         await cleanup_old_data()
-        await cleanup_old_media()  # ✅ Очистка старых медиа
+        await cleanup_old_media()
         await callback.message.edit_text("✅ Очистка БД и медиа завершена!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
         ]), parse_mode="HTML")
