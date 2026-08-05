@@ -123,6 +123,39 @@ async def send_main_menu(target, user, has_business):
 
 @router.message(Command("start"))
 async def start_command(message: Message):
+        if settings.REQUIRED_CHANNEL_ID and settings.REQUIRED_CHANNEL_URL:
+        try:
+            member = await message.bot.get_chat_member(
+                settings.REQUIRED_CHANNEL_ID,
+                message.from_user.id
+            )
+
+            if member.status in ["left", "kicked"]:
+                keyboard = InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text="📢 Подписаться",
+                                url=settings.REQUIRED_CHANNEL_URL
+                            )
+                        ],
+                        [
+                            InlineKeyboardButton(
+                                text="🔄 Проверить подписку",
+                                callback_data="check_subscription"
+                            )
+                        ]
+                    ]
+                )
+
+                await message.answer(
+                    "📢 Для использования бота подпишитесь на канал.",
+                    reply_markup=keyboard
+                )
+                return
+
+        except Exception as e:
+            logger.error(f"Ошибка проверки подписки: {e}")
     user = await UserRepository.get_by_id(message.from_user.id)
     if not user:
         user = await UserRepository.get_or_create(
