@@ -41,6 +41,9 @@ async def start_command(message: Message):
             InlineKeyboardButton(text="📋 Скопировать юзернейм", callback_data="copy_username")
         ],
         [
+            InlineKeyboardButton(text="✏️ Редактирование профиля", url="tg://settings")
+        ],
+        [
             InlineKeyboardButton(text="❓ Описание команд", callback_data="show_help"),
             InlineKeyboardButton(text="⭐ Важное", callback_data="important")
         ],
