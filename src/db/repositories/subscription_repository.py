@@ -85,12 +85,12 @@ class SubscriptionRepository:
             referral = Referral(
                 referrer_id=referrer_id,
                 referred_id=referred_id,
-                days_awarded=3  
+                days_awarded=3
             )
             session.add(referral)
             await SubscriptionRepository.extend_subscription(
                 user_id=referrer_id,
-                days=3,  
+                days=3,
                 reason="referral"
             )
             await session.commit()

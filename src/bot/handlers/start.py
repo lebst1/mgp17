@@ -185,14 +185,21 @@ async def start_command(message: Message):
             referred_id=message.from_user.id
         )
         if success:
+            # ✅ ДАЁМ +1 ДЕНЬ ПРИГЛАШЕННОМУ ПОЛЬЗОВАТЕЛЮ
+            await SubscriptionRepository.extend_subscription(
+                user_id=message.from_user.id,
+                days=1,
+                reason="referred"
+            )
+            
             # ✅ Получаем обновленную подписку для нового пользователя
             subscription = await SubscriptionRepository.get_or_create_subscription(message.from_user.id)
             days_left = (subscription.expires_at - datetime.utcnow()).days if subscription.expires_at else 0
             
             await message.answer(
                 f"🎉 <b>Реферал активирован!</b>\n\n"
-                f"Твой друг получил +3 дня подписки!\n"
-                f"А ты тоже получаешь 1 день бесплатно!\n\n"
+                f"Ты получил <b>+1 день</b> бесплатной подписки!\n"
+                f"Твой друг тоже получил +3 дня!\n\n"
                 f"📊 <b>Твой баланс:</b> {days_left} дней",
                 parse_mode="HTML"
             )
@@ -202,11 +209,9 @@ async def start_command(message: Message):
                 from aiogram import Bot
                 bot = Bot(token=settings.BOT_TOKEN)
                 
-                # Получаем информацию о реферере
                 referrer_user = await UserRepository.get_by_id(referrer_id)
                 referrer_name = referrer_user.first_name or referrer_user.username or "Пользователь" if referrer_user else "Пользователь"
                 
-                # Получаем обновленную подписку реферера
                 referrer_sub = await SubscriptionRepository.get_or_create_subscription(referrer_id)
                 referrer_days = (referrer_sub.expires_at - datetime.utcnow()).days if referrer_sub.expires_at else 0
                 
@@ -222,6 +227,14 @@ async def start_command(message: Message):
                 await bot.session.close()
             except Exception as e:
                 logger.error(f"Ошибка отправки уведомления рефереру: {e}")
+    
+    # ✅ СОЗДАЕМ ПОДПИСКУ (если её нет)
+    subscription = await SubscriptionRepository.get_or_create_subscription(message.from_user.id)
+    
+    connections = await BusinessRepository.get_user_connections(message.from_user.id)
+    has_business = len(connections) > 0
+    
+    await send_main_menu(message, user, has_business)
     
     # ✅ СОЗДАЕМ ПОДПИСКУ (если её нет)
     subscription = await SubscriptionRepository.get_or_create_subscription(message.from_user.id)
