@@ -7,6 +7,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import Update
 
+from src.bot.handlers import start_router, savemode_router, admin_router
 from src.config import settings
 from src.db.session import init_db
 from src.db.repositories.user_repository import UserRepository
@@ -41,6 +42,7 @@ async def setup_dispatcher(bot: Bot) -> Dispatcher:
     dp.include_router(start_router)
     dp.include_router(savemode_router)
     dp.include_router(business_router)
+    dp.include_router(admin_router)
     
     return dp
 
