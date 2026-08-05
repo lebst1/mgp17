@@ -38,71 +38,163 @@ async def download_media(bot: Bot, file_id: str) -> str:
 
 
 async def send_deleted_notification(bot: Bot, user_id: int, saved_msg):
-    username = saved_msg.from_username or 'пользователь'
-    text = f"""<b>{username}</b>
+    username = saved_msg.from_username or "пользователь"
 
-🗑 удалил сообщение.
+    text = f"""
+🗑️ <b>{username}</b> удалил сообщение.
 
-{saved_msg.text or 'Медиа'}
+<blockquote>{saved_msg.text or 'Медиафайл'}</blockquote>
+"""
 
-— — — — — — — — — — — — — — — — — — — —
-💬 {saved_msg.chat_title or 'Личный чат'}"""
-    
     media_path = saved_msg.media_path
+
     if media_path and os.path.exists(media_path):
         try:
             media_file = FSInputFile(media_path)
+
             if saved_msg.media_type == "photo":
-                await bot.send_photo(chat_id=user_id, photo=media_file, caption=text, parse_mode="HTML")
+                await bot.send_photo(
+                    chat_id=user_id,
+                    photo=media_file,
+                    caption=text,
+                    parse_mode="HTML"
+                )
+
             elif saved_msg.media_type == "video":
-                await bot.send_video(chat_id=user_id, video=media_file, caption=text, parse_mode="HTML")
+                await bot.send_video(
+                    chat_id=user_id,
+                    video=media_file,
+                    caption=text,
+                    parse_mode="HTML"
+                )
+
             elif saved_msg.media_type == "document":
-                await bot.send_document(chat_id=user_id, document=media_file, caption=text, parse_mode="HTML")
+                await bot.send_document(
+                    chat_id=user_id,
+                    document=media_file,
+                    caption=text,
+                    parse_mode="HTML"
+                )
+
             elif saved_msg.media_type == "audio":
-                await bot.send_audio(chat_id=user_id, audio=media_file, caption=text, parse_mode="HTML")
+                await bot.send_audio(
+                    chat_id=user_id,
+                    audio=media_file,
+                    caption=text,
+                    parse_mode="HTML"
+                )
+
             elif saved_msg.media_type == "voice":
-                await bot.send_voice(chat_id=user_id, voice=media_file, caption=text, parse_mode="HTML")
+                await bot.send_voice(
+                    chat_id=user_id,
+                    voice=media_file,
+                    caption=text,
+                    parse_mode="HTML"
+                )
+
             else:
-                await bot.send_document(chat_id=user_id, document=media_file, caption=text, parse_mode="HTML")
+                await bot.send_document(
+                    chat_id=user_id,
+                    document=media_file,
+                    caption=text,
+                    parse_mode="HTML"
+                )
+
             return
+
         except Exception as e:
             logger.error(f"❌ Ошибка отправки медиа: {e}")
-    
-    await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
+
+    await bot.send_message(
+        chat_id=user_id,
+        text=text,
+        parse_mode="HTML"
+    )
 
 
-async def send_edit_notification(bot: Bot, user_id: int, saved_msg, old_text: str, new_text: str):
-    username = saved_msg.from_username or 'пользователь'
-    text = f"""<b>{username}</b>
+async def send_edit_notification(
+    bot: Bot,
+    user_id: int,
+    saved_msg,
+    old_text: str,
+    new_text: str
+):
+    username = saved_msg.from_username or "пользователь"
 
-✏️ отредактировал сообщение.
+    text = f"""
+✏️ <b>{username}</b> отредактировал сообщение.
 
-{new_text}
+<blockquote>{old_text or 'Без текста'}</blockquote>
 
-— — — — — — — — — — — — — — — — — — — —
-💬 {saved_msg.chat_title or 'Личный чат'}"""
-    
+↓↓↓
+
+<blockquote>{new_text or 'Без текста'}</blockquote>
+"""
+
     media_path = saved_msg.media_path
+
     if media_path and os.path.exists(media_path):
         try:
             media_file = FSInputFile(media_path)
+
             if saved_msg.media_type == "photo":
-                await bot.send_photo(chat_id=user_id, photo=media_file, caption=text, parse_mode="HTML")
+                await bot.send_photo(
+                    chat_id=user_id,
+                    photo=media_file,
+                    caption=text,
+                    parse_mode="HTML"
+                )
+
             elif saved_msg.media_type == "video":
-                await bot.send_video(chat_id=user_id, video=media_file, caption=text, parse_mode="HTML")
+                await bot.send_video(
+                    chat_id=user_id,
+                    video=media_file,
+                    caption=text,
+                    parse_mode="HTML"
+                )
+
             elif saved_msg.media_type == "document":
-                await bot.send_document(chat_id=user_id, document=media_file, caption=text, parse_mode="HTML")
+                await bot.send_document(
+                    chat_id=user_id,
+                    document=media_file,
+                    caption=text,
+                    parse_mode="HTML"
+                )
+
             elif saved_msg.media_type == "audio":
-                await bot.send_audio(chat_id=user_id, audio=media_file, caption=text, parse_mode="HTML")
+                await bot.send_audio(
+                    chat_id=user_id,
+                    audio=media_file,
+                    caption=text,
+                    parse_mode="HTML"
+                )
+
             elif saved_msg.media_type == "voice":
-                await bot.send_voice(chat_id=user_id, voice=media_file, caption=text, parse_mode="HTML")
+                await bot.send_voice(
+                    chat_id=user_id,
+                    voice=media_file,
+                    caption=text,
+                    parse_mode="HTML"
+                )
+
             else:
-                await bot.send_document(chat_id=user_id, document=media_file, caption=text, parse_mode="HTML")
+                await bot.send_document(
+                    chat_id=user_id,
+                    document=media_file,
+                    caption=text,
+                    parse_mode="HTML"
+                )
+
             return
+
         except Exception as e:
             logger.error(f"❌ Ошибка отправки медиа с правкой: {e}")
-    
-    await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
+
+    await bot.send_message(
+        chat_id=user_id,
+        text=text,
+        parse_mode="HTML"
+    )
 
 
 # Остальные хендлеры такие же, как в предыдущей версии
