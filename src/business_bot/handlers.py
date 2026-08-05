@@ -1,7 +1,6 @@
 import logging
 import json
 import os
-import asyncio
 from aiogram import Router, F, Bot
 from aiogram.types import Message, BusinessConnection, BusinessMessagesDeleted, FSInputFile
 from aiogram.filters import Command
@@ -16,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 MEDIA_DIR = settings.MEDIA_DIR
-MAX_FILE_SIZE = settings.MAX_MEDIA_SIZE_MB * 1024 * 1024  # В байтах
+MAX_FILE_SIZE = settings.MAX_MEDIA_SIZE_MB * 1024 * 1024
 
 
 async def download_media(bot: Bot, file_id: str) -> str:
@@ -24,51 +23,33 @@ async def download_media(bot: Bot, file_id: str) -> str:
     try:
         os.makedirs(MEDIA_DIR, exist_ok=True)
         file = await bot.get_file(file_id)
-        
-        # Проверяем размер файла
         if file.file_size and file.file_size > MAX_FILE_SIZE:
             logger.warning(f"⚠️ Файл слишком большой ({file.file_size} байт), пропускаем")
             return None
-        
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         ext = file.file_path.split('.')[-1] if '.' in file.file_path else 'bin'
         filename = f"{timestamp}_{file_id[:8]}.{ext}"
         file_path = os.path.join(MEDIA_DIR, filename)
-        
         await bot.download_file(file.file_path, file_path)
         logger.info(f"✅ Медиа сохранено: {file_path}")
         return file_path
-        
     except Exception as e:
         logger.error(f"❌ Ошибка скачивания медиа: {e}")
         return None
 
 
 async def send_deleted_notification(bot: Bot, user_id: int, saved_msg):
-    """Отправляет красивое уведомление об удалении с медиа"""
-    text = "🗑 <b>УДАЛЕНО СООБЩЕНИЕ</b>\n\n"
+    """Уведомление об удалении (как на скрине)"""
     
-    if saved_msg.chat_title:
-        text += f"📌 <b>Чат:</b> {saved_msg.chat_title}\n"
-    else:
-        text += f"📌 <b>Чат:</b> {saved_msg.chat_id}\n"
-    
-    if saved_msg.from_username:
-        text += f"👤 <b>От:</b> @{saved_msg.from_username}\n"
-    elif saved_msg.from_first_name:
-        text += f"👤 <b>От:</b> {saved_msg.from_first_name}\n"
-    else:
-        text += f"👤 <b>От:</b> {saved_msg.from_user_id}\n"
-    
-    if saved_msg.original_date:
-        text += f"🕐 <b>Отправлено:</b> {saved_msg.original_date.strftime('%d.%m.%Y %H:%M:%S')}\n"
-    else:
-        text += f"🕐 <b>Отправлено:</b> {saved_msg.saved_at.strftime('%d.%m.%Y %H:%M:%S')}\n"
-    
-    text += f"🕐 <b>Удалено:</b> {datetime.utcnow().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
-    
-    if saved_msg.text:
-        text += f"📝 <b>Текст:</b>\n{saved_msg.text}\n\n"
+    username = saved_msg.from_username or 'пользователь'
+    text = f"""<!>Xwexafi</> (@{username})
+
+🗑 удалил сообщение.
+
+{saved_msg.text or 'Медиа'}
+
+— — — — — — — — — — — — — — — — — — — —
+💬 {saved_msg.chat_title or 'Личный чат'}"""
     
     media_path = saved_msg.media_path
     if media_path and os.path.exists(media_path):
@@ -84,46 +65,27 @@ async def send_deleted_notification(bot: Bot, user_id: int, saved_msg):
                 await bot.send_audio(chat_id=user_id, audio=media_file, caption=text, parse_mode="HTML")
             elif saved_msg.media_type == "voice":
                 await bot.send_voice(chat_id=user_id, voice=media_file, caption=text, parse_mode="HTML")
-            elif saved_msg.media_type == "sticker":
-                await bot.send_sticker(chat_id=user_id, sticker=media_file)
-                await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
             else:
                 await bot.send_document(chat_id=user_id, document=media_file, caption=text, parse_mode="HTML")
-            logger.info(f"✅ Медиа отправлено: {media_path}")
             return
         except Exception as e:
             logger.error(f"❌ Ошибка отправки медиа: {e}")
-            await bot.send_message(chat_id=user_id, text=text + "\n⚠️ <i>Медиафайл недоступен</i>", parse_mode="HTML")
-    else:
-        await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
+    
+    await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
 
 
 async def send_edit_notification(bot: Bot, user_id: int, saved_msg, old_text: str, new_text: str):
-    """Отправляет уведомление об отредактированном сообщении"""
+    """Уведомление о правке (как на скрине)"""
     
-    text = "✏️ <b>ОТРЕДАКТИРОВАНО СООБЩЕНИЕ</b>\n\n"
-    
-    if saved_msg.chat_title:
-        text += f"📌 <b>Чат:</b> {saved_msg.chat_title}\n"
-    else:
-        text += f"📌 <b>Чат:</b> {saved_msg.chat_id}\n"
-    
-    if saved_msg.from_username:
-        text += f"👤 <b>От:</b> @{saved_msg.from_username}\n"
-    elif saved_msg.from_first_name:
-        text += f"👤 <b>От:</b> {saved_msg.from_first_name}\n"
-    else:
-        text += f"👤 <b>От:</b> {saved_msg.from_user_id}\n"
-    
-    if saved_msg.original_date:
-        text += f"🕐 <b>Отправлено:</b> {saved_msg.original_date.strftime('%d.%m.%Y %H:%M:%S')}\n"
-    else:
-        text += f"🕐 <b>Отправлено:</b> {saved_msg.saved_at.strftime('%d.%m.%Y %H:%M:%S')}\n"
-    
-    text += f"🕐 <b>Отредактировано:</b> {datetime.utcnow().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
-    
-    text += f"📝 <b>Было:</b>\n<code>{old_text}</code>\n\n"
-    text += f"📝 <b>Стало:</b>\n<code>{new_text}</code>\n"
+    username = saved_msg.from_username or 'пользователь'
+    text = f"""<!>Xwexafi</> (@{username})
+
+✏️ отредактировал сообщение.
+
+{new_text}
+
+— — — — — — — — — — — — — — — — — — — —
+💬 {saved_msg.chat_title or 'Личный чат'}"""
     
     media_path = saved_msg.media_path
     if media_path and os.path.exists(media_path):
@@ -141,13 +103,11 @@ async def send_edit_notification(bot: Bot, user_id: int, saved_msg, old_text: st
                 await bot.send_voice(chat_id=user_id, voice=media_file, caption=text, parse_mode="HTML")
             else:
                 await bot.send_document(chat_id=user_id, document=media_file, caption=text, parse_mode="HTML")
-            logger.info(f"✅ Медиа отправлено с уведомлением о правке: {media_path}")
             return
         except Exception as e:
             logger.error(f"❌ Ошибка отправки медиа с правкой: {e}")
-            await bot.send_message(chat_id=user_id, text=text + "\n⚠️ <i>Медиафайл недоступен</i>", parse_mode="HTML")
-    else:
-        await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
+    
+    await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
 
 
 @router.business_connection()
@@ -239,7 +199,6 @@ async def handle_business_message(message: Message):
             media_type = "photo"
             media_file_id = message.photo[-1].file_id
             media_size = message.photo[-1].file_size
-            # ✅ Проверка размера
             if media_size and media_size > MAX_FILE_SIZE:
                 logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
             else:
