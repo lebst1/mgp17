@@ -1,6 +1,7 @@
 import asyncio
 import logging
-from aiogram import Bot, Dispatcher
+
+from aiogram import Bot, Dispatcher, BaseMiddleware
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
@@ -15,56 +16,72 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
+
 logger = logging.getLogger(__name__)
 
 
+class DebugMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event, data):
+        try:
+            logger.info(f"RAW UPDATE: {event}")
+        except Exception as e:
+            logger.error(f"Ошибка логирования update: {e}")
+
+        return await handler(event, data)
+
+
 async def setup_dispatcher() -> Dispatcher:
-    """Настройка диспетчера"""
     dp = Dispatcher()
-    
-    # Подключаем middleware
+
+    # Логирование ВСЕХ апдейтов от Telegram
+    dp.update.outer_middleware(DebugMiddleware())
+
+    # Middleware
     dp.message.middleware(AuthMiddleware())
     dp.callback_query.middleware(AuthMiddleware())
-    
-    # Подключаем роутеры
+
+    # Routers
     dp.include_router(start_router)
     dp.include_router(savemode_router)
-    dp.include_router(business_router)  # Бизнес-обработчики
-    
+    dp.include_router(business_router)
+
     return dp
 
 
 async def main():
-    """Главная функция запуска"""
     logger.info("🚀 Запуск Mnemora...")
     logger.info(f"📌 Режим: {settings.TELEGRAM_MODE}")
-    
-    # Инициализация БД
+
     await init_db()
     logger.info("✅ База данных инициализирована")
-    
-    # Создаем владельца в БД (если есть)
+
     if settings.OWNER_TELEGRAM_ID:
-        owner = await UserRepository.get_or_create(settings.OWNER_TELEGRAM_ID)
+        owner = await UserRepository.get_or_create(
+            settings.OWNER_TELEGRAM_ID
+        )
+
         if owner:
             await UserRepository.update_settings(
                 settings.OWNER_TELEGRAM_ID,
                 is_admin=True
             )
-            logger.info(f"👤 Владелец бота: {settings.OWNER_TELEGRAM_ID}")
-    
-    # Настраиваем бота
+
+            logger.info(
+                f"👤 Владелец бота: {settings.OWNER_TELEGRAM_ID}"
+            )
+
     bot = Bot(
         token=settings.BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+        default=DefaultBotProperties(
+            parse_mode=ParseMode.HTML
+        )
     )
-    
-    # Настраиваем диспетчер
+
     dp = await setup_dispatcher()
-    
-    # Запускаем поллинг
+
     logger.info("✅ Бот запущен и готов к работе!")
     logger.info("📌 Ожидание бизнес-событий от ЛЮБЫХ пользователей...")
+
     await dp.start_polling(bot)
 
 
@@ -74,4 +91,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("🛑 Бот остановлен")
     except Exception as e:
-        logger.error(f"❌ Ошибка: {e}")
+        logger.exception(f"❌ Критическая ошибка: {e}")
