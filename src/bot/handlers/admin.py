@@ -46,6 +46,18 @@ async def is_admin(user_id: int) -> bool:
     return user.is_admin if user else False
 
 
+# ✅ БЕЗОПАСНОЕ РЕДАКТИРОВАНИЕ СООБЩЕНИЯ
+async def safe_edit_message(message, text, reply_markup=None, parse_mode="HTML"):
+    """Безопасное редактирование сообщения"""
+    try:
+        await message.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+        return True
+    except Exception as e:
+        if "message is not modified" in str(e):
+            return False
+        raise e
+
+
 # ✅ ГЛАВНОЕ МЕНЮ АДМИНА
 async def show_admin_panel(target):
     text = """
@@ -97,7 +109,7 @@ async def show_admin_panel(target):
     if isinstance(target, Message):
         await target.answer(text, reply_markup=keyboard, parse_mode="HTML")
     else:
-        await target.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+        await safe_edit_message(target.message, text, keyboard)
 
 
 @router.message(Command("admin"))
@@ -116,7 +128,7 @@ async def admin_stats(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    await callback.message.edit_text("📊 <b>Загрузка статистики...</b>", parse_mode="HTML")
+    await safe_edit_message(callback.message, "📊 <b>Загрузка статистики...</b>", parse_mode="HTML")
     
     async with async_session() as session:
         users_count = await session.scalar(select(func.count()).select_from(User))
@@ -164,7 +176,7 @@ async def admin_stats(callback: CallbackQuery):
         ]
     ])
     
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await safe_edit_message(callback.message, text, keyboard)
     await callback.answer()
 
 
@@ -175,14 +187,14 @@ async def admin_broadcast(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         "📨 <b>Рассылка</b>\n\n"
         "Отправь сообщение, которое нужно разослать всем пользователям.\n"
         "Это может быть текст, фото, видео.\n\n"
         "⚠️ <i>Сообщение будет отправлено ВСЕМ пользователям!</i>\n\n"
         "Отправь /cancel чтобы отменить.",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Отмена", callback_data="admin_back")]
         ])
     )
@@ -236,7 +248,8 @@ async def admin_search(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         "🔍 <b>Поиск пользователя</b>\n\n"
         "Отправь ID пользователя или его @username для поиска.\n\n"
         "📌 <b>Примеры:</b>\n"
@@ -350,7 +363,8 @@ async def admin_chats(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         "💬 <b>Чаты пользователя</b>\n\n"
         "Отправь ID пользователя, чтобы увидеть список его чатов.\n\n"
         "📌 <b>Пример:</b> <code>123456789</code>\n\n"
@@ -638,7 +652,7 @@ async def admin_chat_stats(callback: CallbackQuery):
         ]
     ])
     
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await safe_edit_message(callback.message, text, keyboard)
     await callback.answer()
 
 
@@ -651,7 +665,8 @@ async def admin_chat_search_user(callback: CallbackQuery, state: FSMContext):
     
     user_id = int(callback.data.split("_")[-1])
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         f"🔍 <b>Поиск чата у пользователя {user_id}</b>\n\n"
         f"Отправь название чата для поиска.\n\n"
         f"Отправь /cancel чтобы отменить.",
@@ -759,7 +774,8 @@ async def admin_chat_send(callback: CallbackQuery, state: FSMContext):
     user_id = int(parts[3])
     chat_id = int(parts[4])
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         f"📨 <b>Отправить сообщение в чат</b>\n\n"
         f"Пользователь: <code>{user_id}</code>\n"
         f"Чат: <code>{chat_id}</code>\n\n"
@@ -1213,13 +1229,13 @@ async def admin_chat_delete(callback: CallbackQuery):
         ]
     ])
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         f"⚠️ <b>Удалить весь чат?</b>\n\n"
         f"Пользователь: {user_id}\n"
         f"Чат: {chat_id}\n\n"
         f"Это действие необратимо!",
-        reply_markup=keyboard,
-        parse_mode="HTML"
+        keyboard
     )
     await callback.answer()
 
@@ -1254,13 +1270,13 @@ async def admin_chat_delete_confirm(callback: CallbackQuery):
         
         await session.commit()
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         f"✅ Удалено {deleted_count} сообщений из чата {chat_id}",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💬 Список чатов", callback_data=f"admin_chats_user_{user_id}")],
             [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
-        ]),
-        parse_mode="HTML"
+        ])
     )
     await callback.answer()
 
@@ -1304,7 +1320,8 @@ async def admin_ban(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         "🚫 <b>Бан пользователя</b>\n\n"
         "Отправь ID пользователя, которого нужно заблокировать.\n\n"
         "Отправь /cancel чтобы отменить.",
@@ -1321,7 +1338,8 @@ async def admin_unban(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         "✅ <b>Разбан пользователя</b>\n\n"
         "Отправь ID пользователя, которого нужно разблокировать.\n\n"
         "Отправь /cancel чтобы отменить.",
@@ -1371,9 +1389,13 @@ async def admin_users(callback: CallbackQuery):
     if len(text) > 4000:
         text = text[:4000] + "\n... и еще"
     
-    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
-    ]), parse_mode="HTML")
+    await safe_edit_message(
+        callback.message,
+        text,
+        InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
+        ])
+    )
     await callback.answer()
 
 
@@ -1421,16 +1443,20 @@ async def admin_cleanup(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    await callback.message.edit_text("🧹 <b>Очистка БД...</b>", parse_mode="HTML")
+    await safe_edit_message(callback.message, "🧹 <b>Очистка БД...</b>", parse_mode="HTML")
     
     try:
         await cleanup_old_data()
         await cleanup_old_media()
-        await callback.message.edit_text("✅ Очистка БД и медиа завершена!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
-        ]), parse_mode="HTML")
+        await safe_edit_message(
+            callback.message,
+            "✅ Очистка БД и медиа завершена!",
+            InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
+            ])
+        )
     except Exception as e:
-        await callback.message.edit_text(f"❌ Ошибка очистки: {e}", parse_mode="HTML")
+        await safe_edit_message(callback.message, f"❌ Ошибка очистки: {e}", parse_mode="HTML")
     
     await callback.answer()
 
@@ -1453,17 +1479,17 @@ async def admin_backup(callback: CallbackQuery):
         
         if os.path.exists("data/app.db"):
             shutil.copy2("data/app.db", f"{backup_dir}/app_{date}.db")
-            await callback.message.edit_text(
+            await safe_edit_message(
+                callback.message,
                 f"✅ Бэкап создан: app_{date}.db",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
-                ]),
-                parse_mode="HTML"
+                ])
             )
         else:
-            await callback.message.edit_text("❌ Файл БД не найден!", parse_mode="HTML")
+            await safe_edit_message(callback.message, "❌ Файл БД не найден!", parse_mode="HTML")
     except Exception as e:
-        await callback.message.edit_text(f"❌ Ошибка бэкапа: {e}", parse_mode="HTML")
+        await safe_edit_message(callback.message, f"❌ Ошибка бэкапа: {e}", parse_mode="HTML")
     
     await callback.answer()
 
@@ -1509,10 +1535,12 @@ async def admin_status(callback: CallbackQuery):
 📦 Лимит: {MAX_MEDIA_FILES} файлов
 """
     
-    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔄 Обновить", callback_data="admin_status")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
-    ]), parse_mode="HTML")
+    ])
+    
+    await safe_edit_message(callback.message, text, keyboard)
     await callback.answer()
 
 
