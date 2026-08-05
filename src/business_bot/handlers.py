@@ -1,7 +1,7 @@
 import logging
 import json
-from aiogram import Router, F, Bot
-from aiogram.types import Message, BusinessConnection, BusinessMessagesDeleted
+from aiogram import Router, F, Bot, types
+from aiogram.types import Message, BusinessConnection, Update
 from aiogram.filters import Command
 from datetime import datetime
 from src.db.repositories.user_repository import UserRepository
@@ -121,22 +121,24 @@ async def handle_business_message(message: Message):
         logger.error(f"❌ Ошибка сохранения сообщения: {e}")
 
 
-# ⚡ ТУТ ГЛАВНОЕ ИЗМЕНЕНИЕ
-@router.business_messages_deleted()
-async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
-    """Обработчик удаленных сообщений — КАК В ГОТОВЫХ ПРОЕКТАХ"""
+# ✅ АЛЬТЕРНАТИВНЫЙ ОБРАБОТЧИК УДАЛЕНИЙ — РАБОТАЕТ В ЛЮБОЙ ВЕРСИИ AIOGRAM 3.x
+@router.update(lambda update: update.business_messages_deleted is not None)
+async def handle_business_deleted(update: Update, bot: Bot):
+    """Обработчик удаленных бизнес-сообщений через Update"""
+    event = update.business_messages_deleted
+    
     logger.info(f"🔍 Получено удаление бизнес-сообщений")
     logger.info(f"🔗 business_connection_id: {event.business_connection_id}")
     logger.info(f"📋 message_ids: {event.message_ids}")
     logger.info(f"📌 chat_id: {event.chat.id}")
-    
-    # Получаем пользователя по connection_id
+
+    # Получаем пользователя по business_connection_id
     user = await BusinessRepository.get_user_by_connection(event.business_connection_id)
     if not user:
         logger.warning(f"⚠️ Пользователь не найден для connection_id: {event.business_connection_id}")
         return
-    
-    # Помечаем каждое сообщение как удаленное
+
+    # Помечаем сообщения как удаленные
     for message_id in event.message_ids:
         try:
             await MessageRepository.mark_as_deleted(
@@ -147,8 +149,8 @@ async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
             logger.info(f"✅ Сообщение {message_id} отмечено как удаленное")
         except Exception as e:
             logger.error(f"❌ Ошибка обработки удаления: {e}")
-    
-    # Отправляем уведомление (как в примерах)
+
+    # Отправляем уведомление владельцу
     try:
         await bot.send_message(
             chat_id=user.telegram_id,
