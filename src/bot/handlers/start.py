@@ -7,13 +7,11 @@ from src.db.repositories.business_repository import BusinessRepository
 router = Router()
 
 
-# ✅ ГЛАВНОЕ МЕНЮ (СТАРТ) — С ПРОВЕРКОЙ ПОЛЬЗОВАТЕЛЯ
+# ✅ ГЛАВНОЕ МЕНЮ (СТАРТ)
 @router.message(Command("start"))
 async def start_command(message: Message):
-    # ✅ ПРОВЕРЯЕМ, ЕСТЬ ЛИ ПОЛЬЗОВАТЕЛЬ В БД
     user = await UserRepository.get_by_id(message.from_user.id)
     if not user:
-        # Если нет — создаём
         user = await UserRepository.get_or_create(
             telegram_id=message.from_user.id,
             username=message.from_user.username,
@@ -67,11 +65,6 @@ async def show_help(callback: CallbackQuery):
 /help — 📖 Список команд
 /settings — ⚙️ Настройки
 /savemode — 📝 SAVE MODE
-/deleted — 🗑 Удалённые
-/search — 🔍 Поиск
-/edits — ✏️ Правки
-/media — 🖼️ Медиа
-/business_status — 📊 Статус
 """
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -80,7 +73,6 @@ async def show_help(callback: CallbackQuery):
             InlineKeyboardButton(text="✏️ Редактирование профиля", url="tg://settings")
         ],
         [
-            InlineKeyboardButton(text="📊 Статус", callback_data="business_status"),
             InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings")
         ],
         [
@@ -92,14 +84,6 @@ async def show_help(callback: CallbackQuery):
     await callback.answer()
 
 
-# ✅ СТАТУС БИЗНЕСА
-@router.callback_query(lambda c: c.data == "business_status")
-async def show_business_status(callback: CallbackQuery):
-    await callback.answer()
-    from src.business_bot.handlers import business_status
-    await business_status(callback.message)
-
-
 # ✅ НАСТРОЙКИ
 @router.callback_query(lambda c: c.data == "settings")
 async def show_settings(callback: CallbackQuery):
@@ -107,13 +91,11 @@ async def show_settings(callback: CallbackQuery):
 <b>⚙️ Настройки</b>
 
 ▸ SAVE MODE — сохранение сообщений
-▸ Автоответчик — автоматические ответы
 """
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📝 SAVE MODE", callback_data="savemode_settings"),
-            InlineKeyboardButton(text="🤖 Автоответ", callback_data="autoreply_settings")
+            InlineKeyboardButton(text="📝 SAVE MODE", callback_data="savemode_settings")
         ],
         [
             InlineKeyboardButton(text="📋 Скопировать @username", callback_data="copy_username"),
@@ -135,8 +117,6 @@ async def savemode_settings(callback: CallbackQuery):
 <b>📝 SAVE MODE</b>
 
 ▸ Включить / Выключить сохранение
-▸ Просмотр удалённых сообщений
-▸ Поиск по базе
 """
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -153,34 +133,10 @@ async def savemode_settings(callback: CallbackQuery):
     await callback.answer()
 
 
-# ✅ АВТООТВЕТЧИК НАСТРОЙКИ
-@router.callback_query(lambda c: c.data == "autoreply_settings")
-async def autoreply_settings(callback: CallbackQuery):
-    text = """
-<b>🤖 Автоответчик</b>
-
-▸ Автоматические ответы на сообщения
-"""
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🤖 Включить", callback_data="autoreply_on"),
-            InlineKeyboardButton(text="🤖 Выключить", callback_data="autoreply_off")
-        ],
-        [
-            InlineKeyboardButton(text="🔙 Назад", callback_data="settings")
-        ]
-    ])
-    
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-    await callback.answer()
-
-
 # ✅ НАЗАД В ГЛАВНОЕ МЕНЮ
 @router.callback_query(lambda c: c.data == "back_to_start")
 async def back_to_start(callback: CallbackQuery):
     await callback.answer()
-    # Передаём callback.message, а не просто message
     await start_command(callback.message)
 
 
@@ -195,17 +151,13 @@ async def savemode_off(callback: CallbackQuery):
     await callback.answer("❌ SAVE MODE выключен! Используй /savemode off")
 
 
-@router.callback_query(lambda c: c.data == "autoreply_on")
-async def autoreply_on(callback: CallbackQuery):
-    await callback.answer("🤖 Автоответчик включен! Используй /autoreply on")
-
-
-@router.callback_query(lambda c: c.data == "autoreply_off")
-async def autoreply_off(callback: CallbackQuery):
-    await callback.answer("🤖 Автоответчик выключен! Используй /autoreply off")
-
-
 # ✅ КОМАНДА /help
 @router.message(Command("help"))
 async def help_command(message: Message):
     await show_help(message)
+
+
+# ✅ КОМАНДА /settings
+@router.message(Command("settings"))
+async def settings_command(message: Message):
+    await show_settings(message)
