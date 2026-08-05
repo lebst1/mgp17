@@ -1,6 +1,7 @@
 import logging
 import json
 import os
+import asyncio
 from aiogram import Router, F, Bot
 from aiogram.types import Message, BusinessConnection, BusinessMessagesDeleted, FSInputFile
 from aiogram.filters import Command
@@ -19,6 +20,7 @@ MAX_FILE_SIZE = settings.MAX_MEDIA_SIZE_MB * 1024 * 1024
 
 
 async def download_media(bot: Bot, file_id: str) -> str:
+    """Скачивает медиафайл и возвращает путь к нему"""
     try:
         os.makedirs(MEDIA_DIR, exist_ok=True)
         file = await bot.get_file(file_id)
@@ -38,179 +40,88 @@ async def download_media(bot: Bot, file_id: str) -> str:
 
 
 async def send_deleted_notification(bot: Bot, user_id: int, saved_msg):
-    username = saved_msg.from_username or "unknown"
-    first_name = saved_msg.from_first_name or "Пользователь"
+    """Уведомление об удалении с поддержкой всех типов медиа"""
+    
+    username = saved_msg.from_username or 'пользователь'
+    text = f"""<b>{username}</b>
 
-    delete_time = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+🗑 удалил сообщение.
 
-    text = f"""
-🗑️ <b>Удалено сообщение</b>
+{saved_msg.text or 'Медиа'}
 
-👤 <a href="tg://user?id={saved_msg.from_user_id}">{first_name}</a>
-📛 @{username}
-🕒 <code>{delete_time}</code>
-
-<blockquote>{saved_msg.text or '📎 Медиафайл'}</blockquote>
-"""
-
+— — — — — — — — — — — — — — — — — — — —
+💬 {saved_msg.chat_title or 'Личный чат'}"""
+    
     media_path = saved_msg.media_path
-
     if media_path and os.path.exists(media_path):
         try:
             media_file = FSInputFile(media_path)
-
+            
             if saved_msg.media_type == "photo":
-                await bot.send_photo(
-                    chat_id=user_id,
-                    photo=media_file,
-                    caption=text,
-                    parse_mode="HTML"
-                )
-
+                await bot.send_photo(chat_id=user_id, photo=media_file, caption=text, parse_mode="HTML")
             elif saved_msg.media_type == "video":
-                await bot.send_video(
-                    chat_id=user_id,
-                    video=media_file,
-                    caption=text,
-                    parse_mode="HTML"
-                )
-
+                await bot.send_video(chat_id=user_id, video=media_file, caption=text, parse_mode="HTML")
+            elif saved_msg.media_type == "video_note":
+                await bot.send_video_note(chat_id=user_id, video_note=media_file)
+                await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
             elif saved_msg.media_type == "document":
-                await bot.send_document(
-                    chat_id=user_id,
-                    document=media_file,
-                    caption=text,
-                    parse_mode="HTML"
-                )
-
+                await bot.send_document(chat_id=user_id, document=media_file, caption=text, parse_mode="HTML")
             elif saved_msg.media_type == "audio":
-                await bot.send_audio(
-                    chat_id=user_id,
-                    audio=media_file,
-                    caption=text,
-                    parse_mode="HTML"
-                )
-
+                await bot.send_audio(chat_id=user_id, audio=media_file, caption=text, parse_mode="HTML")
             elif saved_msg.media_type == "voice":
-                await bot.send_voice(
-                    chat_id=user_id,
-                    voice=media_file,
-                    caption=text,
-                    parse_mode="HTML"
-                )
-
+                await bot.send_voice(chat_id=user_id, voice=media_file, caption=text, parse_mode="HTML")
+            elif saved_msg.media_type == "sticker":
+                await bot.send_sticker(chat_id=user_id, sticker=media_file)
+                await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
             else:
-                await bot.send_document(
-                    chat_id=user_id,
-                    document=media_file,
-                    caption=text,
-                    parse_mode="HTML"
-                )
-
+                await bot.send_document(chat_id=user_id, document=media_file, caption=text, parse_mode="HTML")
             return
-
         except Exception as e:
             logger.error(f"❌ Ошибка отправки медиа: {e}")
+    
+    await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
 
-    await bot.send_message(
-        chat_id=user_id,
-        text=text,
-        parse_mode="HTML"
-    )
 
-async def send_edit_notification(
-    bot: Bot,
-    user_id: int,
-    saved_msg,
-    old_text: str,
-    new_text: str
-):
-    username = saved_msg.from_username or "unknown"
-    first_name = saved_msg.from_first_name or "Пользователь"
+async def send_edit_notification(bot: Bot, user_id: int, saved_msg, old_text: str, new_text: str):
+    """Уведомление о правке с поддержкой всех типов медиа"""
+    
+    username = saved_msg.from_username or 'пользователь'
+    text = f"""<b>{username}</b>
 
-    edit_time = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+✏️ отредактировал сообщение.
 
-    text = f"""
-✏️ <b>Изменено сообщение</b>
+{new_text}
 
-👤 <a href="tg://user?id={saved_msg.from_user_id}">{first_name}</a>
-📛 @{username}
-🕒 <code>{edit_time}</code>
-
-<blockquote>{old_text or 'Без текста'}</blockquote>
-
-⬇️⬇️⬇️
-
-<blockquote>{new_text or 'Без текста'}</blockquote>
-"""
-
+— — — — — — — — — — — — — — — — — — — —
+💬 {saved_msg.chat_title or 'Личный чат'}"""
+    
     media_path = saved_msg.media_path
-
     if media_path and os.path.exists(media_path):
         try:
             media_file = FSInputFile(media_path)
-
+            
             if saved_msg.media_type == "photo":
-                await bot.send_photo(
-                    chat_id=user_id,
-                    photo=media_file,
-                    caption=text,
-                    parse_mode="HTML"
-                )
-
+                await bot.send_photo(chat_id=user_id, photo=media_file, caption=text, parse_mode="HTML")
             elif saved_msg.media_type == "video":
-                await bot.send_video(
-                    chat_id=user_id,
-                    video=media_file,
-                    caption=text,
-                    parse_mode="HTML"
-                )
-
+                await bot.send_video(chat_id=user_id, video=media_file, caption=text, parse_mode="HTML")
+            elif saved_msg.media_type == "video_note":
+                await bot.send_video_note(chat_id=user_id, video_note=media_file)
+                await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
             elif saved_msg.media_type == "document":
-                await bot.send_document(
-                    chat_id=user_id,
-                    document=media_file,
-                    caption=text,
-                    parse_mode="HTML"
-                )
-
+                await bot.send_document(chat_id=user_id, document=media_file, caption=text, parse_mode="HTML")
             elif saved_msg.media_type == "audio":
-                await bot.send_audio(
-                    chat_id=user_id,
-                    audio=media_file,
-                    caption=text,
-                    parse_mode="HTML"
-                )
-
+                await bot.send_audio(chat_id=user_id, audio=media_file, caption=text, parse_mode="HTML")
             elif saved_msg.media_type == "voice":
-                await bot.send_voice(
-                    chat_id=user_id,
-                    voice=media_file,
-                    caption=text,
-                    parse_mode="HTML"
-                )
-
+                await bot.send_voice(chat_id=user_id, voice=media_file, caption=text, parse_mode="HTML")
             else:
-                await bot.send_document(
-                    chat_id=user_id,
-                    document=media_file,
-                    caption=text,
-                    parse_mode="HTML"
-                )
-
+                await bot.send_document(chat_id=user_id, document=media_file, caption=text, parse_mode="HTML")
             return
-
         except Exception as e:
             logger.error(f"❌ Ошибка отправки медиа с правкой: {e}")
-
-    await bot.send_message(
-        chat_id=user_id,
-        text=text,
-        parse_mode="HTML"
-    )
+    
+    await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
 
 
-# Остальные хендлеры такие же, как в предыдущей версии
 @router.business_connection()
 async def handle_business_connection(event: BusinessConnection, bot: Bot):
     user_id = event.user.id
@@ -304,6 +215,7 @@ async def handle_business_message(message: Message):
                 logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
             else:
                 media_path = await download_media(message.bot, media_file_id)
+                
         elif message.video:
             media_type = "video"
             media_file_id = message.video.file_id
@@ -312,6 +224,7 @@ async def handle_business_message(message: Message):
                 logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
             else:
                 media_path = await download_media(message.bot, media_file_id)
+                
         elif message.document:
             media_type = "document"
             media_file_id = message.document.file_id
@@ -320,6 +233,7 @@ async def handle_business_message(message: Message):
                 logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
             else:
                 media_path = await download_media(message.bot, media_file_id)
+                
         elif message.audio:
             media_type = "audio"
             media_file_id = message.audio.file_id
@@ -328,6 +242,7 @@ async def handle_business_message(message: Message):
                 logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
             else:
                 media_path = await download_media(message.bot, media_file_id)
+                
         elif message.voice:
             media_type = "voice"
             media_file_id = message.voice.file_id
@@ -336,10 +251,20 @@ async def handle_business_message(message: Message):
                 logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
             else:
                 media_path = await download_media(message.bot, media_file_id)
+                
         elif message.sticker:
             media_type = "sticker"
             media_file_id = message.sticker.file_id
             media_size = message.sticker.file_size
+            if media_size and media_size > MAX_FILE_SIZE:
+                logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
+            else:
+                media_path = await download_media(message.bot, media_file_id)
+        
+        elif message.video_note:
+            media_type = "video_note"
+            media_file_id = message.video_note.file_id
+            media_size = message.video_note.file_size
             if media_size and media_size > MAX_FILE_SIZE:
                 logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
             else:
@@ -353,6 +278,7 @@ async def handle_business_message(message: Message):
         
         await MessageRepository.save_message(message_data)
         logger.info(f"💾 Сохранено сообщение от {user.telegram_id} в чате {message.chat.id}")
+        
     except Exception as e:
         logger.error(f"❌ Ошибка сохранения сообщения: {e}")
 
@@ -376,12 +302,14 @@ async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
                 chat_id=event.chat.id,
                 user_id=owner.telegram_id
             )
+            
             if saved_msg:
                 saved_msg.is_deleted = True
                 async with async_session() as session:
                     await session.merge(saved_msg)
                     await session.commit()
                 logger.info(f"✅ Сообщение {message_id} отмечено как удаленное")
+
                 if saved_msg.from_user_id != owner.telegram_id:
                     await send_deleted_notification(bot, owner.telegram_id, saved_msg)
                     logger.info(f"✅ Уведомление отправлено владельцу {owner.telegram_id}")
@@ -389,45 +317,57 @@ async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
                     logger.info(f"ℹ️ Сообщение {message_id} удалено владельцем, уведомление не отправляем")
             else:
                 logger.warning(f"⚠️ Сообщение {message_id} не найдено в БД")
+                
         except Exception as e:
             logger.error(f"❌ Ошибка обработки удаления: {e}")
 
 
 @router.edited_business_message()
 async def handle_business_edited(message: Message):
+    """Обработчик отредактированных бизнес-сообщений"""
     if not message.from_user:
         return
+    
     connection_id = message.business_connection_id
     if not connection_id:
         return
+    
     user = await BusinessRepository.get_user_by_connection(connection_id)
     if not user:
         logger.warning(f"⚠️ Пользователь не найден для connection_id: {connection_id}")
         return
+    
     logger.info(f"✏️ Отредактировано сообщение {message.message_id} от {user.telegram_id}")
     logger.info(f"📝 Новый текст: {message.text or message.caption}")
+    
     try:
         saved_msg = await MessageRepository.get_by_id_and_chat(
             message_id=message.message_id,
             chat_id=message.chat.id,
             user_id=user.telegram_id
         )
+        
         if saved_msg:
             old_text = saved_msg.text or ""
             new_text = message.text or message.caption or ""
+            
             history = json.loads(saved_msg.edit_history) if saved_msg.edit_history else []
             history.append({
                 "old_text": old_text,
                 "new_text": new_text,
                 "edited_at": datetime.utcnow().isoformat()
             })
+            
             saved_msg.text = new_text
             saved_msg.is_edited = True
             saved_msg.edit_history = json.dumps(history[-10:])
+            
             async with async_session() as session:
                 await session.merge(saved_msg)
                 await session.commit()
+                
             logger.info(f"✅ Обновлена история правок для сообщения {message.message_id}")
+            
             if saved_msg.from_user_id != user.telegram_id:
                 await send_edit_notification(message.bot, user.telegram_id, saved_msg, old_text, new_text)
                 logger.info(f"✅ Уведомление о правке отправлено владельцу {user.telegram_id}")
@@ -435,6 +375,7 @@ async def handle_business_edited(message: Message):
                 logger.info(f"ℹ️ Сообщение {message.message_id} отредактировано владельцем")
         else:
             logger.warning(f"⚠️ Сообщение {message.message_id} не найдено в БД")
+            
     except Exception as e:
         logger.error(f"❌ Ошибка обработки правки: {e}")
 
@@ -449,7 +390,9 @@ async def business_status(message: Message):
             first_name=message.from_user.first_name,
             last_name=message.from_user.last_name
         )
+    
     connections = await BusinessRepository.get_user_connections(message.from_user.id)
+    
     status_text = f"""
 📊 <b>Статус Business подключения</b>
 
@@ -459,6 +402,7 @@ async def business_status(message: Message):
 🔗 Подключений: {len(connections)}
 📊 Сохранено сообщений: {user.messages_saved}
 """
+    
     if connections:
         status_text += "\n<b>Активные подключения:</b>\n"
         for conn in connections:
@@ -467,23 +411,30 @@ async def business_status(message: Message):
                 status_text += f"  Подключен: {conn.created_at.strftime('%d.%m.%Y %H:%M')}\n"
             else:
                 status_text += "  Подключен: Неизвестно\n"
+    
     await message.answer(status_text, parse_mode="HTML")
 
 
 @router.message(Command("savemode"))
 async def toggle_savemode(message: Message):
     args = message.text.split()
+    
     if len(args) < 2:
         await message.answer("ℹ️ Использование: /savemode on - включить, /savemode off - выключить")
         return
+    
     action = args[1].lower()
+    
     if action not in ["on", "off"]:
         await message.answer("❌ Используйте 'on' или 'off'")
         return
+    
     enabled = action == "on"
     user = await UserRepository.update_settings(message.from_user.id, savemode_enabled=enabled)
+    
     if not user:
         await message.answer("❌ Ошибка: пользователь не найден")
         return
+    
     status = "включен" if enabled else "выключен"
     await message.answer(f"✅ SAVE MODE {status} для вашего аккаунта")
