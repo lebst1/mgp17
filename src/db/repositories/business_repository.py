@@ -3,6 +3,9 @@ from typing import Optional, List
 from datetime import datetime
 from src.db.models import BusinessConnection, User
 from src.db.session import async_session
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class BusinessRepository:
@@ -61,6 +64,37 @@ class BusinessRepository:
                 )
             )
             return result.scalar_one_or_none()
+    
+    # ✅ НОВЫЙ МЕТОД
+    @staticmethod
+    async def get_or_create_connection_by_user(connection_id: str, user_id: int) -> BusinessConnection:
+        """Получить или создать подключение по connection_id и user_id"""
+        async with async_session() as session:
+            # Ищем существующее
+            result = await session.execute(
+                select(BusinessConnection).where(
+                    BusinessConnection.connection_id == connection_id
+                )
+            )
+            connection = result.scalar_one_or_none()
+            
+            if connection:
+                return connection
+            
+            # Если не нашли — создаем новое
+            logger.info(f"💾 Создаем новый connection_id: {connection_id} для пользователя {user_id}")
+            connection = BusinessConnection(
+                connection_id=connection_id,
+                user_id=user_id,
+                is_enabled=True,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+                last_activity=datetime.utcnow()
+            )
+            session.add(connection)
+            await session.commit()
+            await session.refresh(connection)
+            return connection
     
     @staticmethod
     async def update_activity(connection_id: str):

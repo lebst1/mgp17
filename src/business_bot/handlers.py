@@ -55,6 +55,7 @@ async def handle_business_connection(event: BusinessConnection, bot: Bot):
 # ✅ НОВЫЕ СООБЩЕНИЯ
 @router.business_message()
 async def handle_business_message(message: Message):
+    """Обработчик новых бизнес-сообщений"""
     if message.edit_date is not None:
         return
     
@@ -67,10 +68,20 @@ async def handle_business_message(message: Message):
     
     logger.info(f"📩 Новое сообщение с connection_id: {connection_id}")
     
+    # Пытаемся получить пользователя
     user = await BusinessRepository.get_user_by_connection(connection_id)
+    
+    # Если не нашли — создаем новый connection_id
     if not user:
-        logger.warning(f"⚠️ Неизвестный connection_id: {connection_id}")
-        return
+        logger.warning(f"⚠️ Неизвестный connection_id: {connection_id}, создаем новый")
+        connection = await BusinessRepository.get_or_create_connection_by_user(
+            connection_id=connection_id,
+            user_id=message.from_user.id
+        )
+        user = await UserRepository.get_by_id(message.from_user.id)
+        if not user:
+            logger.warning(f"⚠️ Пользователь {message.from_user.id} не найден")
+            return
     
     if not user.savemode_enabled:
         return
@@ -116,10 +127,11 @@ async def handle_business_message(message: Message):
         logger.error(f"❌ Ошибка сохранения сообщения: {e}")
 
 
-# ✅ УДАЛЕННЫЕ СООБЩЕНИЯ — УПРОЩЕННАЯ ВЕРСИЯ
+# ✅ УДАЛЕННЫЕ СООБЩЕНИЯ
 @router.message(F.business_connection_id.is_not(None))
 async def handle_business_deleted(message: Message):
     """Обработчик удаленных сообщений"""
+    # Проверяем, что это именно удаление (нет текста и нет медиа)
     if message.text or message.caption or message.photo or message.video or message.document:
         return
     
@@ -156,6 +168,7 @@ async def handle_business_deleted(message: Message):
 # ✅ ОТРЕДАКТИРОВАННЫЕ СООБЩЕНИЯ
 @router.business_message()
 async def handle_business_edited(message: Message):
+    """Обработчик отредактированных сообщений"""
     if not message.edit_date:
         return
     
@@ -201,6 +214,7 @@ async def handle_business_edited(message: Message):
 # ✅ КОМАНДА /business_status
 @router.message(Command("business_status"))
 async def business_status(message: Message):
+    """Проверить статус бизнес-подключения"""
     user = await UserRepository.get_by_id(message.from_user.id)
     connections = await BusinessRepository.get_user_connections(message.from_user.id)
     
@@ -229,6 +243,7 @@ async def business_status(message: Message):
 # ✅ КОМАНДА /savemode
 @router.message(Command("savemode"))
 async def toggle_savemode(message: Message):
+    """Включить/выключить SAVE MODE"""
     args = message.text.split()
     
     if len(args) < 2:
