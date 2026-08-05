@@ -1,5 +1,12 @@
 from aiogram import Router
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile
+from aiogram.types import (
+    Message,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    CallbackQuery,
+    FSInputFile,
+    CopyTextButton
+)
 from aiogram.filters import Command
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.business_repository import BusinessRepository
@@ -31,20 +38,37 @@ async def get_main_menu(user, has_business):
 """
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="📋 Скопировать юзернейм", callback_data="copy_username")
-        ],
-        [
-            InlineKeyboardButton(text="✏️ Редактирование профиля", callback_data="edit_profile")
-        ],
-        [
-            InlineKeyboardButton(text="❓ Описание команд", callback_data="show_help"),
-            InlineKeyboardButton(text="⭐ Важное", callback_data="important")
-        ],
-        [
-            InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings")
-        ]
-    ])
+    [
+        InlineKeyboardButton(
+            text="📋 Скопировать юзернейм",
+            copy_text=CopyTextButton(
+                text="@SafeSaverX_bot"
+            )
+        )
+    ],
+    [
+        InlineKeyboardButton(
+            text="✏️ Редактирование профиля",
+            callback_data="edit_profile"
+        )
+    ],
+    [
+        InlineKeyboardButton(
+            text="❓ Описание команд",
+            callback_data="show_help"
+        ),
+        InlineKeyboardButton(
+            text="⭐ Важное",
+            callback_data="important"
+        )
+    ],
+    [
+        InlineKeyboardButton(
+            text="⚙️ Настройки",
+            callback_data="settings"
+        )
+    ]
+])
     
     return text, keyboard
 
@@ -84,21 +108,26 @@ async def start_command(message: Message):
     await send_main_menu(message, user, has_business)
 
 
-# ✅ КОПИРОВАНИЕ ЮЗЕРНЕЙМ
-@router.callback_query(lambda c: c.data == "copy_username")
-async def copy_username(callback: CallbackQuery):
-    await callback.answer(
-        text="✅ @SafeSaverX_bot скопирован!\n\nОткрой Настройки → Редактирование профиля → Автоматизация действий и вставь юзернейм.",
-        show_alert=True
-    )
-
 
 # ✅ РЕДАКТИРОВАНИЕ ПРОФИЛЯ
 @router.callback_query(lambda c: c.data == "edit_profile")
 async def edit_profile(callback: CallbackQuery):
-    await callback.answer(
-        text="📌 Открой Настройки Telegram → Редактирование профиля → Автоматизация действий → вставь @SafeSaverX_bot",
-        show_alert=True
+    await callback.answer()
+
+    await callback.message.answer(
+        """
+<b>📌 Как подключить SafeSaverX</b>
+
+1. Открой Telegram
+2. Настройки
+3. Редактирование профиля
+4. Автоматизация действий
+5. Добавь <code>@SafeSaverX_bot</code>
+6. Выдай все разрешения
+
+После подключения бот начнёт сохранять сообщения.
+""",
+        parse_mode="HTML"
     )
 
 
