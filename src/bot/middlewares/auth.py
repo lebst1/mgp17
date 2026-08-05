@@ -1,6 +1,6 @@
 from typing import Callable, Dict, Any, Awaitable
-from aiogram import BaseMiddleware
-from aiogram.types import Message, CallbackQuery
+from aiogram import BaseMiddleware, Bot
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from src.db.repositories.user_repository import UserRepository
 from src.config import settings
 import logging
@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class AuthMiddleware(BaseMiddleware):
-    """Middleware для проверки авторизации пользователей"""
+    """Middleware для проверки авторизации пользователей и подписки на канал"""
     
     async def __call__(
         self,
@@ -17,7 +17,6 @@ class AuthMiddleware(BaseMiddleware):
         event: Message,
         data: Dict[str, Any]
     ) -> Any:
-        # Пропускаем, если нет пользователя (например, callback от бота)
         if not hasattr(event, 'from_user') or not event.from_user:
             return await handler(event, data)
         
@@ -30,6 +29,45 @@ class AuthMiddleware(BaseMiddleware):
                 "Обратитесь к администратору."
             )
             return
+        
+        # ✅ ПРОВЕРКА ПОДПИСКИ НА КАНАЛ
+        if settings.REQUIRED_CHANNEL_ID and settings.REQUIRED_CHANNEL_URL:
+            try:
+                bot: Bot = data.get('bot')
+                if bot:
+                    member = await bot.get_chat_member(
+                        chat_id=settings.REQUIRED_CHANNEL_ID,
+                        user_id=user_id
+                    )
+                    
+                    if member.status in ['left', 'kicked']:
+                        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                            [
+                                InlineKeyboardButton(
+                                    text="📢 Подписаться на канал",
+                                    url=settings.REQUIRED_CHANNEL_URL
+                                )
+                            ],
+                            [
+                                InlineKeyboardButton(
+                                    text="🔄 Проверить подписку",
+                                    callback_data="check_subscription"
+                                )
+                            ]
+                        ])
+                        
+                        await event.answer(
+                            f"📢 <b>Подпишитесь на наш канал!</b>\n\n"
+                            f"Для использования бота необходимо подписаться на канал:\n"
+                            f"{settings.REQUIRED_CHANNEL_URL}\n\n"
+                            f"После подписки нажмите «Проверить подписку».",
+                            reply_markup=keyboard,
+                            parse_mode="HTML"
+                        )
+                        return
+                        
+            except Exception as e:
+                logger.error(f"❌ Ошибка проверки подписки: {e}")
         
         # Добавляем пользователя в БД
         try:
@@ -57,11 +95,9 @@ class AdminMiddleware(BaseMiddleware):
     ) -> Any:
         user_id = event.from_user.id
         
-        # Проверяем, является ли пользователь админом
         user = await UserRepository.get_by_id(user_id)
         
         if not user or not user.is_admin:
-            # Проверяем, может быть это владелец
             if user_id != settings.OWNER_TELEGRAM_ID:
                 await event.answer("⛔ Эта команда доступна только администраторам")
                 return

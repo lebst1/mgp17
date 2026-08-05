@@ -1,21 +1,17 @@
-from aiogram import Router
-from aiogram.types import (
-    Message,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    CallbackQuery,
-    FSInputFile,
-    CopyTextButton
-)
+from aiogram import Router, Bot
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile
 from aiogram.filters import Command
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.business_repository import BusinessRepository
+from src.config import settings
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
 
-# ✅ ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ МЕНЮ
 async def get_main_menu(user, has_business):
     text = f"""
 <b>SafeSaverX</b>
@@ -23,6 +19,7 @@ async def get_main_menu(user, has_business):
 👤 <b>Профиль</b>
 ▸ Статус: <b>{'активен' if user.is_active else 'неактивен'}</b>
 ▸ SAVE MODE: <b>{'включен' if user.savemode_enabled else 'выключен'}</b>
+▸ Business: <b>{'подключен' if has_business else 'не подключен'}</b>
 
 📌 <b>Как подключить бота:</b>
 1. Нажми «📋 Скопировать юзернейм»
@@ -34,43 +31,34 @@ async def get_main_menu(user, has_business):
 <b>Что умеет бот:</b>
 • Присылает уведомления, когда собеседник удаляет сообщение
 • Присылает уведомления, когда собеседник редактирует сообщение
-• Сохраняет фото, голосовые и видео
+• Сохраняет сгорающие фото, голосовые и видео
 """
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-    [
-    InlineKeyboardButton(
-        text="📋 Скопировать юзернейм",
-        copy_text=CopyTextButton(
-            text="@laosllebot"
-        )
-    )
-],
-[
-    InlineKeyboardButton(text="✏️ Редактирование профиля", callback_data="edit_profile")
-],
-    [
-        InlineKeyboardButton(
-            text="❓ Описание команд",
-            callback_data="show_help"
-        ),
-        InlineKeyboardButton(
-            text="⭐ Важное",
-            callback_data="important"
-        )
-    ],
-    [
-        InlineKeyboardButton(
-            text="⚙️ Настройки",
-            callback_data="settings"
-        )
-    ]
-])
+        [
+            InlineKeyboardButton(text="📋 Скопировать юзернейм", callback_data="copy_username")
+        ],
+        [
+            InlineKeyboardButton(text="✏️ Редактирование профиля", callback_data="edit_profile")
+        ],
+        [
+            InlineKeyboardButton(text="❓ Описание команд", callback_data="show_help"),
+            InlineKeyboardButton(text="⭐ Важное", callback_data="important")
+        ],
+        [
+            InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings")
+        ]
+    ])
+    
+    # ✅ Добавляем кнопку канала
+    if settings.REQUIRED_CHANNEL_URL:
+        keyboard.inline_keyboard.append([
+            InlineKeyboardButton(text="📢 Наш канал", url=settings.REQUIRED_CHANNEL_URL)
+        ])
     
     return text, keyboard
 
 
-# ✅ ОТПРАВКА МЕНЮ (С ФОТО ИЛИ БЕЗ)
 async def send_main_menu(target, user, has_business):
     text, keyboard = await get_main_menu(user, has_business)
     photo_path = "assets/menu.jpg"
@@ -87,7 +75,6 @@ async def send_main_menu(target, user, has_business):
         await target.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 
-# ✅ ГЛАВНОЕ МЕНЮ (СТАРТ)
 @router.message(Command("start"))
 async def start_command(message: Message):
     user = await UserRepository.get_by_id(message.from_user.id)
@@ -105,30 +92,22 @@ async def start_command(message: Message):
     await send_main_menu(message, user, has_business)
 
 
-
-# ✅ РЕДАКТИРОВАНИЕ ПРОФИЛЯ
-@router.callback_query(lambda c: c.data == "edit_profile")
-async def edit_profile(callback: CallbackQuery):
-    await callback.answer()
-
-    await callback.message.answer(
-        """
-<b>📌 Как подключить SafeSaverX</b>
-
-1. Открой Telegram
-2. Настройки
-3. Редактирование профиля
-4. Автоматизация действий
-5. Добавь <code>@SafeSaverX_bot</code>
-6. Выдай все разрешения
-
-После подключения бот начнёт сохранять сообщения.
-""",
-        parse_mode="HTML"
+@router.callback_query(lambda c: c.data == "copy_username")
+async def copy_username(callback: CallbackQuery):
+    await callback.answer(
+        text="✅ @SafeSaverX_bot скопирован!\n\nОткрой Настройки → Редактирование профиля → Автоматизация действий и вставь юзернейм.",
+        show_alert=True
     )
 
 
-# ✅ ОПИСАНИЕ КОМАНД
+@router.callback_query(lambda c: c.data == "edit_profile")
+async def edit_profile(callback: CallbackQuery):
+    await callback.answer(
+        text="📌 Открой Настройки Telegram → Редактирование профиля → Автоматизация действий → вставь @SafeSaverX_bot",
+        show_alert=True
+    )
+
+
 @router.callback_query(lambda c: c.data == "show_help")
 async def show_help(callback: CallbackQuery):
     text = """
@@ -153,7 +132,6 @@ async def show_help(callback: CallbackQuery):
     await callback.answer()
 
 
-# ✅ ВАЖНОЕ
 @router.callback_query(lambda c: c.data == "important")
 async def important(callback: CallbackQuery):
     text = """
@@ -161,7 +139,7 @@ async def important(callback: CallbackQuery):
 
 1️⃣ Дай ВСЕ разрешения на работу с сообщениями
 2️⃣ Бот присылает уведомления при удалении/правке
-3️⃣ Сохраняет фото, голосовые и видео
+3️⃣ Сохраняет сгорающие фото, голосовые и видео
 """
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")]
@@ -176,7 +154,6 @@ async def important(callback: CallbackQuery):
     await callback.answer()
 
 
-# ✅ НАСТРОЙКИ
 @router.callback_query(lambda c: c.data == "settings")
 async def show_settings(callback: CallbackQuery):
     text = """
@@ -202,7 +179,6 @@ async def show_settings(callback: CallbackQuery):
     await callback.answer()
 
 
-# ✅ SAVE MODE НАСТРОЙКИ
 @router.callback_query(lambda c: c.data == "savemode_settings")
 async def savemode_settings(callback: CallbackQuery):
     text = """
@@ -229,7 +205,6 @@ async def savemode_settings(callback: CallbackQuery):
     await callback.answer()
 
 
-# ✅ НАЗАД В ГЛАВНОЕ МЕНЮ
 @router.callback_query(lambda c: c.data == "back_to_start")
 async def back_to_start(callback: CallbackQuery):
     await callback.answer()
@@ -254,6 +229,52 @@ async def back_to_start(callback: CallbackQuery):
     await send_main_menu(callback.message, user, has_business)
 
 
+@router.callback_query(lambda c: c.data == "check_subscription")
+async def check_subscription(callback: CallbackQuery, bot: Bot):
+    user_id = callback.from_user.id
+    
+    try:
+        member = await bot.get_chat_member(
+            chat_id=settings.REQUIRED_CHANNEL_ID,
+            user_id=user_id
+        )
+        
+        if member.status in ['left', 'kicked']:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="📢 Подписаться на канал",
+                        url=settings.REQUIRED_CHANNEL_URL
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="🔄 Проверить подписку",
+                        callback_data="check_subscription"
+                    )
+                ]
+            ])
+            await callback.message.edit_text(
+                f"📢 <b>Вы ещё не подписаны на канал!</b>\n\n"
+                f"Подпишитесь и нажмите «Проверить подписку».",
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+        else:
+            await callback.message.edit_text(
+                "✅ <b>Спасибо за подписку!</b>\n\n"
+                "Теперь вы можете пользоваться ботом.\n"
+                "Напишите /start, чтобы начать.",
+                parse_mode="HTML"
+            )
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка проверки подписки: {e}")
+        await callback.answer("❌ Ошибка проверки, попробуйте позже.", show_alert=True)
+    
+    await callback.answer()
+
+
 # ✅ ЗАГЛУШКИ
 @router.callback_query(lambda c: c.data == "savemode_on")
 async def savemode_on(callback: CallbackQuery):
@@ -265,38 +286,11 @@ async def savemode_off(callback: CallbackQuery):
     await callback.answer("❌ SAVE MODE выключен! Используй /savemode off")
 
 
-# ✅ КОМАНДА /help
 @router.message(Command("help"))
 async def help_command(message: Message):
-    text = """
-❓ <b>Команды SafeSaverX</b>
-
-/start — Главное меню
-/help — Список команд
-/settings — Настройки
-/savemode on — Включить SAVE MODE
-/savemode off — Выключить SAVE MODE
-"""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")]
-    ])
-    await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    await show_help(message)
 
 
-# ✅ КОМАНДА /settings
 @router.message(Command("settings"))
 async def settings_command(message: Message):
-    text = """
-⚙️ <b>Настройки</b>
-
-▸ SAVE MODE — включить/выключить сохранение
-"""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="📝 SAVE MODE", callback_data="savemode_settings")
-        ],
-        [
-            InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")
-        ]
-    ])
-    await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    await show_settings(message)

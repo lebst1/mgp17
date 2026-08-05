@@ -29,6 +29,10 @@ class Settings:
     
     # Очистка старых данных
     CLEANUP_DAYS: int = int(os.getenv("CLEANUP_DAYS", 30))  # ✅ Сколько дней хранить
+
+    # Добавляем в класс Settings
+    REQUIRED_CHANNEL_ID: int = int(os.getenv("REQUIRED_CHANNEL_ID", 0))
+    REQUIRED_CHANNEL_URL: str = os.getenv("REQUIRED_CHANNEL_URL", "")
     
     # Другие настройки
     REPEAT_DELAY_MIN_SECONDS: int = int(os.getenv("REPEAT_DELAY_MIN_SECONDS", 1))
