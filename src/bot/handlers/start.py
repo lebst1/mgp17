@@ -123,7 +123,8 @@ async def send_main_menu(target, user, has_business):
 
 @router.message(Command("start"))
 async def start_command(message: Message):
-        if settings.REQUIRED_CHANNEL_ID and settings.REQUIRED_CHANNEL_URL:
+
+    if settings.REQUIRED_CHANNEL_ID and settings.REQUIRED_CHANNEL_URL:
         try:
             member = await message.bot.get_chat_member(
                 settings.REQUIRED_CHANNEL_ID,
