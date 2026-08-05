@@ -414,6 +414,8 @@ async def show_chats_search(target, search_query: str):
     await target.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 
+from sqlalchemy import case  # ✅ ДОБАВИТЬ В НАЧАЛЕ ФАЙЛА
+
 async def show_chats_list(target, user_id: int):
     """Показывает список всех чатов пользователя"""
     
@@ -423,15 +425,23 @@ async def show_chats_list(target, user_id: int):
             await target.answer("❌ Пользователь не найден")
             return
         
+        # ✅ ИСПРАВЛЕНО: правильный синтаксис case()
+        deleted_count = func.sum(
+            case((SavedMessage.is_deleted == True, 1), else_=0)
+        ).label('deleted_count')
+        
+        edited_count = func.sum(
+            case((SavedMessage.is_edited == True, 1), else_=0)
+        ).label('edited_count')
+        
         chats = await session.execute(
             select(
                 SavedMessage.chat_id,
                 SavedMessage.chat_title,
                 func.count(SavedMessage.id).label('count'),
                 func.max(SavedMessage.saved_at).label('last_activity'),
-                # ✅ ИСПРАВЛЕНО: используем case вместо cast
-                func.sum(func.case((SavedMessage.is_deleted == True, 1), else_=0)).label('deleted_count'),
-                func.sum(func.case((SavedMessage.is_edited == True, 1), else_=0)).label('edited_count')
+                deleted_count,
+                edited_count
             )
             .where(SavedMessage.user_id == user_id)
             .group_by(SavedMessage.chat_id, SavedMessage.chat_title)
@@ -587,6 +597,7 @@ async def process_chat_search(message: Message, state: FSMContext):
 
 # ✅ СТАТИСТИКА ЧАТОВ ПОЛЬЗОВАТЕЛЯ
 @router.callback_query(lambda c: c.data.startswith("admin_chat_stats_"))
+@router.callback_query(lambda c: c.data.startswith("admin_chat_stats_"))
 async def admin_chat_stats(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
@@ -617,13 +628,26 @@ async def admin_chat_stats(callback: CallbackQuery):
             )
         )
         
+        # ✅ ИСПРАВЛЕНО: правильный синтаксис case()
+        deleted_sum = func.sum(
+            case((SavedMessage.is_deleted == True, 1), else_=0)
+        ).label('deleted')
+        
+        edited_sum = func.sum(
+            case((SavedMessage.is_edited == True, 1), else_=0)
+        ).label('edited')
+        
+        media_sum = func.sum(
+            case((SavedMessage.media_path.isnot(None), 1), else_=0)
+        ).label('media')
+        
         chats = await session.execute(
             select(
                 SavedMessage.chat_title,
                 func.count(SavedMessage.id).label('count'),
-                func.sum(func.case((SavedMessage.is_deleted == True, 1), else_=0)).label('deleted'),
-                func.sum(func.case((SavedMessage.is_edited == True, 1), else_=0)).label('edited'),
-                func.sum(func.case((SavedMessage.media_path.isnot(None), 1), else_=0)).label('media')
+                deleted_sum,
+                edited_sum,
+                media_sum
             )
             .where(SavedMessage.user_id == user_id)
             .group_by(SavedMessage.chat_title)
@@ -664,7 +688,6 @@ async def admin_chat_stats(callback: CallbackQuery):
     
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
-
 
 # ✅ ОТКРЫТЬ КОНКРЕТНЫЙ ЧАТ
 @router.callback_query(lambda c: c.data.startswith("admin_chat_open_"))
