@@ -23,22 +23,31 @@ async def start_command(message: Message):
     has_business = len(connections) > 0
     
     text = f"""
-🛡️ <b>SafeSaverX</b>
+<b>SafeSaverX</b>
 
-Привет! Я сохраняю удалённые и отредактированные сообщения.
-
+👤 <b>Профиль</b>
 ▸ Статус: <b>{'активен' if user.is_active else 'неактивен'}</b>
 ▸ SAVE MODE: <b>{'включен' if user.savemode_enabled else 'выключен'}</b>
 ▸ Business: <b>{'подключен' if has_business else 'не подключен'}</b>
+
+📌 <b>Важно!</b> Дайте все разрешения на работу с сообщениями.
+
+• Бот присылает уведомления, когда собеседник удаляет или редактирует сообщения.
+• Может сохранять сгорающие фото, голосовые и видео.
 """
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📋 Скопировать @username", callback_data="copy_username"),
+            InlineKeyboardButton(text="📋 Скопировать юзернейм", callback_data="copy_username")
+        ],
+        [
             InlineKeyboardButton(text="✏️ Редактирование профиля", url="tg://settings")
         ],
         [
-            InlineKeyboardButton(text="📖 Команды", callback_data="show_help"),
+            InlineKeyboardButton(text="❓ Описание команд", callback_data="show_help"),
+            InlineKeyboardButton(text="⭐ Важное", callback_data="important")
+        ],
+        [
             InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings")
         ]
     ])
@@ -46,7 +55,7 @@ async def start_command(message: Message):
     await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 
-# ✅ КОПИРОВАНИЕ USERNAME
+# ✅ КОПИРОВАНИЕ ЮЗЕРНЕЙМ
 @router.callback_query(lambda c: c.data == "copy_username")
 async def copy_username(callback: CallbackQuery):
     await callback.answer(
@@ -55,31 +64,37 @@ async def copy_username(callback: CallbackQuery):
     )
 
 
-# ✅ ПОМОЩЬ / КОМАНДЫ
+# ✅ ОПИСАНИЕ КОМАНД
 @router.callback_query(lambda c: c.data == "show_help")
 async def show_help(callback: CallbackQuery):
     text = """
-<b>📚 Команды SafeSaverX</b>
+❓ <b>Описание команд</b>
 
-/start — 🚀 Приветствие
+/start — 🚀 Главное меню
 /help — 📖 Список команд
 /settings — ⚙️ Настройки
-/savemode — 📝 SAVE MODE
+/savemode — 📝 Вкл/Выкл SAVE MODE
 """
-    
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="📋 Скопировать @username", callback_data="copy_username"),
-            InlineKeyboardButton(text="✏️ Редактирование профиля", url="tg://settings")
-        ],
-        [
-            InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings")
-        ],
-        [
-            InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")
-        ]
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")]
     ])
-    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+# ✅ ВАЖНОЕ
+@router.callback_query(lambda c: c.data == "important")
+async def important(callback: CallbackQuery):
+    text = """
+⭐ <b>Важное</b>
+
+• Дайте все разрешения на работу с сообщениями
+• Бот присылает уведомления при удалении/правке
+• Сохраняет сгорающие фото, голосовые и видео
+"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")]
+    ])
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
 
@@ -88,24 +103,18 @@ async def show_help(callback: CallbackQuery):
 @router.callback_query(lambda c: c.data == "settings")
 async def show_settings(callback: CallbackQuery):
     text = """
-<b>⚙️ Настройки</b>
+⚙️ <b>Настройки</b>
 
 ▸ SAVE MODE — сохранение сообщений
 """
-    
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="📝 SAVE MODE", callback_data="savemode_settings")
         ],
         [
-            InlineKeyboardButton(text="📋 Скопировать @username", callback_data="copy_username"),
-            InlineKeyboardButton(text="✏️ Редактирование профиля", url="tg://settings")
-        ],
-        [
-            InlineKeyboardButton(text="🔙 Назад", callback_data="show_help")
+            InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")
         ]
     ])
-    
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
 
@@ -114,11 +123,10 @@ async def show_settings(callback: CallbackQuery):
 @router.callback_query(lambda c: c.data == "savemode_settings")
 async def savemode_settings(callback: CallbackQuery):
     text = """
-<b>📝 SAVE MODE</b>
+📝 <b>SAVE MODE</b>
 
 ▸ Включить / Выключить сохранение
 """
-    
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="✅ Включить", callback_data="savemode_on"),
@@ -128,7 +136,6 @@ async def savemode_settings(callback: CallbackQuery):
             InlineKeyboardButton(text="🔙 Назад", callback_data="settings")
         ]
     ])
-    
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
 
