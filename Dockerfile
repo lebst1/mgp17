@@ -1,22 +1,18 @@
-FROM python:3.12-slim
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
-
+# Установка зависимостей
 COPY requirements.txt .
-RUN pip install --upgrade pip \
-    && pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-COPY src ./src
-COPY README.md ./.env.example ./
+# Копирование кода
+COPY . .
 
-RUN mkdir -p /app/data/media
+# Создание папок
+RUN mkdir -p data logs assets
 
+# Запуск
 CMD ["python", "-m", "src.main"]
+
+

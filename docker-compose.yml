@@ -1,10 +1,26 @@
+version: '3.8'
+
 services:
   mnemora:
     build: .
-    container_name: mnemora
-    restart: unless-stopped
+    container_name: safesaverx_bot
+    restart: always
     env_file:
       - .env
     volumes:
       - ./data:/app/data
-    command: python -m src.main
+      - ./logs:/app/logs
+      - ./assets:/app/assets
+    environment:
+      - TZ=${TIMEZONE:-UTC}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - safesaverx_network
+
+networks:
+  safesaverx_network:
+    driver: bridge
