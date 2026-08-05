@@ -2,7 +2,7 @@ import logging
 import json
 import os
 from aiogram import Router, F, Bot
-from aiogram.types import Message, BusinessConnection, BusinessMessagesDeleted, FSInputFile, Update
+from aiogram.types import Message, BusinessConnection, BusinessMessagesDeleted, FSInputFile
 from aiogram.filters import Command
 from datetime import datetime
 from src.db.repositories.user_repository import UserRepository
@@ -140,7 +140,6 @@ async def send_edit_notification(bot: Bot, user_id: int, saved_msg, old_text: st
         await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
 
 
-# ✅ ПОДКЛЮЧЕНИЕ БИЗНЕС-АККАУНТА
 @router.business_connection()
 async def handle_business_connection(event: BusinessConnection, bot: Bot):
     user_id = event.user.id
@@ -177,7 +176,6 @@ async def handle_business_connection(event: BusinessConnection, bot: Bot):
     logger.info(f"✅ Пользователь {user_id} подключил бизнес-аккаунт")
 
 
-# ✅ НОВЫЕ СООБЩЕНИЯ
 @router.business_message()
 async def handle_business_message(message: Message):
     if message.edit_date is not None:
@@ -271,7 +269,6 @@ async def handle_business_message(message: Message):
         logger.error(f"❌ Ошибка сохранения сообщения: {e}")
 
 
-# ✅ УДАЛЕННЫЕ СООБЩЕНИЯ
 @router.deleted_business_messages()
 async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
     logger.info(f"🔍 Получено удаление бизнес-сообщений!")
@@ -311,7 +308,6 @@ async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
             logger.error(f"❌ Ошибка обработки удаления: {e}")
 
 
-# ✅ ОТРЕДАКТИРОВАННЫЕ СООБЩЕНИЯ — ПРАВИЛЬНЫЙ ОБРАБОТЧИК
 @router.edited_business_message()
 async def handle_business_edited(message: Message):
     """Обработчик отредактированных бизнес-сообщений"""
@@ -331,7 +327,6 @@ async def handle_business_edited(message: Message):
     logger.info(f"📝 Новый текст: {message.text or message.caption}")
     
     try:
-        # Ищем оригинальное сообщение в БД
         saved_msg = await MessageRepository.get_by_id_and_chat(
             message_id=message.message_id,
             chat_id=message.chat.id,
@@ -342,7 +337,6 @@ async def handle_business_edited(message: Message):
             old_text = saved_msg.text or ""
             new_text = message.text or message.caption or ""
             
-            # Сохраняем историю правок
             history = json.loads(saved_msg.edit_history) if saved_msg.edit_history else []
             history.append({
                 "old_text": old_text,
@@ -360,7 +354,6 @@ async def handle_business_edited(message: Message):
                 
             logger.info(f"✅ Обновлена история правок для сообщения {message.message_id}")
             
-            # Отправляем уведомление только если сообщение отредактировал не владелец
             if saved_msg.from_user_id != user.telegram_id:
                 await send_edit_notification(message.bot, user.telegram_id, saved_msg, old_text, new_text)
                 logger.info(f"✅ Уведомление о правке отправлено владельцу {user.telegram_id}")
@@ -375,13 +368,22 @@ async def handle_business_edited(message: Message):
 
 @router.message(Command("business_status"))
 async def business_status(message: Message):
+    # ✅ ПРОВЕРЯЕМ, ЕСТЬ ЛИ ПОЛЬЗОВАТЕЛЬ В БД
     user = await UserRepository.get_by_id(message.from_user.id)
+    if not user:
+        user = await UserRepository.get_or_create(
+            telegram_id=message.from_user.id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name,
+            last_name=message.from_user.last_name
+        )
+    
     connections = await BusinessRepository.get_user_connections(message.from_user.id)
     
     status_text = f"""
 📊 <b>Статус Business подключения</b>
 
-👤 Пользователь: {user.first_name or user.username}
+👤 Пользователь: {user.first_name or user.username or str(user.telegram_id)}
 ✅ Аккаунт: {'активен' if user.is_active else 'заблокирован'}
 📝 SAVE MODE: {'✅ Включен' if user.savemode_enabled else '❌ Выключен'}
 🔗 Подключений: {len(connections)}
