@@ -14,8 +14,6 @@ from src.config import settings
 logger = logging.getLogger(__name__)
 
 router = Router()
-
-# Папка для сохранения медиа
 MEDIA_DIR = settings.MEDIA_DIR
 
 
@@ -23,19 +21,14 @@ async def download_media(bot: Bot, file_id: str) -> str:
     """Скачивает медиафайл и возвращает путь к нему"""
     try:
         os.makedirs(MEDIA_DIR, exist_ok=True)
-        
         file = await bot.get_file(file_id)
-        
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         ext = file.file_path.split('.')[-1] if '.' in file.file_path else 'bin'
         filename = f"{timestamp}_{file_id[:8]}.{ext}"
         file_path = os.path.join(MEDIA_DIR, filename)
-        
         await bot.download_file(file.file_path, file_path)
-        
         logger.info(f"✅ Медиа сохранено: {file_path}")
         return file_path
-        
     except Exception as e:
         logger.error(f"❌ Ошибка скачивания медиа: {e}")
         return None
@@ -43,8 +36,6 @@ async def download_media(bot: Bot, file_id: str) -> str:
 
 async def send_deleted_notification(bot: Bot, user_id: int, saved_msg):
     """Отправляет красивое уведомление об удалении с медиа"""
-    
-    # Формируем текстовую часть
     text = "🗑 <b>УДАЛЕНО СООБЩЕНИЕ</b>\n\n"
     
     if saved_msg.chat_title:
@@ -69,83 +60,84 @@ async def send_deleted_notification(bot: Bot, user_id: int, saved_msg):
     if saved_msg.text:
         text += f"📝 <b>Текст:</b>\n{saved_msg.text}\n\n"
     
-    # ✅ ОТПРАВЛЯЕМ МЕДИА + ТЕКСТ
     media_path = saved_msg.media_path
-    
     if media_path and os.path.exists(media_path):
         try:
             media_file = FSInputFile(media_path)
-            
             if saved_msg.media_type == "photo":
-                await bot.send_photo(
-                    chat_id=user_id,
-                    photo=media_file,
-                    caption=text,
-                    parse_mode="HTML"
-                )
+                await bot.send_photo(chat_id=user_id, photo=media_file, caption=text, parse_mode="HTML")
             elif saved_msg.media_type == "video":
-                await bot.send_video(
-                    chat_id=user_id,
-                    video=media_file,
-                    caption=text,
-                    parse_mode="HTML"
-                )
+                await bot.send_video(chat_id=user_id, video=media_file, caption=text, parse_mode="HTML")
             elif saved_msg.media_type == "document":
-                await bot.send_document(
-                    chat_id=user_id,
-                    document=media_file,
-                    caption=text,
-                    parse_mode="HTML"
-                )
+                await bot.send_document(chat_id=user_id, document=media_file, caption=text, parse_mode="HTML")
             elif saved_msg.media_type == "audio":
-                await bot.send_audio(
-                    chat_id=user_id,
-                    audio=media_file,
-                    caption=text,
-                    parse_mode="HTML"
-                )
+                await bot.send_audio(chat_id=user_id, audio=media_file, caption=text, parse_mode="HTML")
             elif saved_msg.media_type == "voice":
-                await bot.send_voice(
-                    chat_id=user_id,
-                    voice=media_file,
-                    caption=text,
-                    parse_mode="HTML"
-                )
+                await bot.send_voice(chat_id=user_id, voice=media_file, caption=text, parse_mode="HTML")
             elif saved_msg.media_type == "sticker":
-                await bot.send_sticker(
-                    chat_id=user_id,
-                    sticker=media_file
-                )
-                # Для стикеров отправляем текст отдельно
-                await bot.send_message(
-                    chat_id=user_id,
-                    text=text,
-                    parse_mode="HTML"
-                )
+                await bot.send_sticker(chat_id=user_id, sticker=media_file)
+                await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
             else:
-                await bot.send_document(
-                    chat_id=user_id,
-                    document=media_file,
-                    caption=text,
-                    parse_mode="HTML"
-                )
-            
+                await bot.send_document(chat_id=user_id, document=media_file, caption=text, parse_mode="HTML")
             logger.info(f"✅ Медиа отправлено: {media_path}")
             return
-            
         except Exception as e:
             logger.error(f"❌ Ошибка отправки медиа: {e}")
-            await bot.send_message(
-                chat_id=user_id,
-                text=text + "\n⚠️ <i>Медиафайл недоступен для отправки</i>",
-                parse_mode="HTML"
-            )
+            await bot.send_message(chat_id=user_id, text=text + "\n⚠️ <i>Медиафайл недоступен</i>", parse_mode="HTML")
     else:
-        await bot.send_message(
-            chat_id=user_id,
-            text=text,
-            parse_mode="HTML"
-        )
+        await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
+
+
+async def send_edit_notification(bot: Bot, user_id: int, saved_msg, old_text: str, new_text: str):
+    """Отправляет уведомление об отредактированном сообщении"""
+    
+    text = "✏️ <b>ОТРЕДАКТИРОВАНО СООБЩЕНИЕ</b>\n\n"
+    
+    if saved_msg.chat_title:
+        text += f"📌 <b>Чат:</b> {saved_msg.chat_title}\n"
+    else:
+        text += f"📌 <b>Чат:</b> {saved_msg.chat_id}\n"
+    
+    if saved_msg.from_username:
+        text += f"👤 <b>От:</b> @{saved_msg.from_username}\n"
+    elif saved_msg.from_first_name:
+        text += f"👤 <b>От:</b> {saved_msg.from_first_name}\n"
+    else:
+        text += f"👤 <b>От:</b> {saved_msg.from_user_id}\n"
+    
+    if saved_msg.original_date:
+        text += f"🕐 <b>Отправлено:</b> {saved_msg.original_date.strftime('%d.%m.%Y %H:%M:%S')}\n"
+    else:
+        text += f"🕐 <b>Отправлено:</b> {saved_msg.saved_at.strftime('%d.%m.%Y %H:%M:%S')}\n"
+    
+    text += f"🕐 <b>Отредактировано:</b> {datetime.utcnow().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
+    
+    text += f"📝 <b>Было:</b>\n<code>{old_text}</code>\n\n"
+    text += f"📝 <b>Стало:</b>\n<code>{new_text}</code>\n"
+    
+    media_path = saved_msg.media_path
+    if media_path and os.path.exists(media_path):
+        try:
+            media_file = FSInputFile(media_path)
+            if saved_msg.media_type == "photo":
+                await bot.send_photo(chat_id=user_id, photo=media_file, caption=text, parse_mode="HTML")
+            elif saved_msg.media_type == "video":
+                await bot.send_video(chat_id=user_id, video=media_file, caption=text, parse_mode="HTML")
+            elif saved_msg.media_type == "document":
+                await bot.send_document(chat_id=user_id, document=media_file, caption=text, parse_mode="HTML")
+            elif saved_msg.media_type == "audio":
+                await bot.send_audio(chat_id=user_id, audio=media_file, caption=text, parse_mode="HTML")
+            elif saved_msg.media_type == "voice":
+                await bot.send_voice(chat_id=user_id, voice=media_file, caption=text, parse_mode="HTML")
+            else:
+                await bot.send_document(chat_id=user_id, document=media_file, caption=text, parse_mode="HTML")
+            logger.info(f"✅ Медиа отправлено с уведомлением о правке: {media_path}")
+            return
+        except Exception as e:
+            logger.error(f"❌ Ошибка отправки медиа с правкой: {e}")
+            await bot.send_message(chat_id=user_id, text=text + "\n⚠️ <i>Медиафайл недоступен</i>", parse_mode="HTML")
+    else:
+        await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
 
 
 @router.business_connection()
@@ -322,6 +314,7 @@ async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
             logger.error(f"❌ Ошибка обработки удаления: {e}")
 
 
+# ✅ ОБРАБОТЧИК ПРАВОК
 @router.business_message()
 async def handle_business_edited(message: Message):
     if not message.edit_date:
@@ -341,26 +334,85 @@ async def handle_business_edited(message: Message):
     logger.info(f"✏️ Отредактировано сообщение {message.message_id} от {user.telegram_id}")
     
     try:
-        saved_msg = await MessageRepository.get_by_id(
+        saved_msg = await MessageRepository.get_by_id_and_chat(
             message_id=message.message_id,
+            chat_id=message.chat.id,
             user_id=user.telegram_id
         )
         
-        if saved_msg and saved_msg.text != message.text:
+        if saved_msg:
+            old_text = saved_msg.text or ""
+            new_text = message.text or message.caption or ""
+            
             history = json.loads(saved_msg.edit_history) if saved_msg.edit_history else []
             history.append({
-                "old_text": saved_msg.text,
-                "new_text": message.text,
+                "old_text": old_text,
+                "new_text": new_text,
                 "edited_at": datetime.utcnow().isoformat()
             })
             
+            saved_msg.text = new_text
+            saved_msg.is_edited = True
+            saved_msg.edit_history = json.dumps(history[-10:])
+            
             async with async_session() as session:
-                saved_msg.text = message.text
-                saved_msg.is_edited = True
-                saved_msg.edit_history = json.dumps(history[-10:])
+                await session.merge(saved_msg)
                 await session.commit()
                 
             logger.info(f"✅ Обновлена история правок для сообщения {message.message_id}")
+            
+            if saved_msg.from_user_id != user.telegram_id:
+                await send_edit_notification(message.bot, user.telegram_id, saved_msg, old_text, new_text)
+                logger.info(f"✅ Уведомление о правке отправлено владельцу {user.telegram_id}")
+            else:
+                logger.info(f"ℹ️ Сообщение {message.message_id} отредактировано владельцем, уведомление не отправляем")
+        else:
+            # Сохраняем как новое с пометкой is_edited
+            logger.warning(f"⚠️ Сообщение {message.message_id} не найдено в БД для правки, сохраняем как новое")
+            message_data = {
+                "user_id": user.telegram_id,
+                "connection_id": connection_id,
+                "chat_id": message.chat.id,
+                "chat_title": message.chat.title or "Личный чат",
+                "message_id": message.message_id,
+                "from_user_id": message.from_user.id,
+                "from_username": message.from_user.username,
+                "from_first_name": message.from_user.first_name,
+                "text": message.text or message.caption,
+                "is_edited": True,
+                "saved_at": datetime.utcnow(),
+                "original_date": datetime.utcnow()
+            }
+            
+            media_path = None
+            media_file_id = None
+            media_type = None
+            media_size = None
+            
+            if message.photo:
+                media_type = "photo"
+                media_file_id = message.photo[-1].file_id
+                media_size = message.photo[-1].file_size
+                media_path = await download_media(message.bot, media_file_id)
+            elif message.video:
+                media_type = "video"
+                media_file_id = message.video.file_id
+                media_size = message.video.file_size
+                media_path = await download_media(message.bot, media_file_id)
+            elif message.document:
+                media_type = "document"
+                media_file_id = message.document.file_id
+                media_size = message.document.file_size
+                media_path = await download_media(message.bot, media_file_id)
+            
+            if media_path:
+                message_data["media_path"] = media_path
+                message_data["media_file_id"] = media_file_id
+                message_data["media_type"] = media_type
+                message_data["media_size"] = media_size
+            
+            await MessageRepository.save_message(message_data)
+            logger.info(f"💾 Сохранено отредактированное сообщение {message.message_id}")
             
     except Exception as e:
         logger.error(f"❌ Ошибка обработки правки: {e}")
