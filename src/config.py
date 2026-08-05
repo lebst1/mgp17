@@ -8,7 +8,6 @@ load_dotenv()
 
 @dataclass
 class Settings:
-    # Базовые настройки
     BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
     OWNER_TELEGRAM_ID: int = int(os.getenv("OWNER_TELEGRAM_ID", 0))
     
@@ -23,18 +22,15 @@ class Settings:
     
     SAVE_MODE_ENABLED: bool = os.getenv("SAVE_MODE_ENABLED", "true").lower() == "true"
     SAVE_MEDIA_ENABLED: bool = os.getenv("SAVE_MEDIA_ENABLED", "true").lower() == "true"
-    MAX_MEDIA_SIZE_MB: int = int(os.getenv("MAX_MEDIA_SIZE_MB", 15))  # ✅ Уменьшено до 15 МБ
+    MAX_MEDIA_SIZE_MB: int = int(os.getenv("MAX_MEDIA_SIZE_MB", 15))
     
     ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY", "")
     
-    # Очистка старых данных
-    CLEANUP_DAYS: int = int(os.getenv("CLEANUP_DAYS", 30))  # ✅ Сколько дней хранить
-
-    # Добавляем в класс Settings
+    CLEANUP_DAYS: int = int(os.getenv("CLEANUP_DAYS", 30))
+    
     REQUIRED_CHANNEL_ID: int = int(os.getenv("REQUIRED_CHANNEL_ID", 0))
     REQUIRED_CHANNEL_URL: str = os.getenv("REQUIRED_CHANNEL_URL", "")
     
-    # Другие настройки
     REPEAT_DELAY_MIN_SECONDS: int = int(os.getenv("REPEAT_DELAY_MIN_SECONDS", 1))
     REPEAT_DELAY_MAX_SECONDS: int = int(os.getenv("REPEAT_DELAY_MAX_SECONDS", 3))
     TIMEZONE: str = os.getenv("TIMEZONE", "UTC")
