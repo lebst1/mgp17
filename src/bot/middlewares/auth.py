@@ -31,7 +31,6 @@ class AuthMiddleware(BaseMiddleware):
             await event.answer("⛔ У вас нет доступа к этому боту.")
             return
         
-        # ✅ ПРОВЕРКА ПОДПИСКИ
         subscription = await SubscriptionRepository.get_active_subscription(user_id)
         if not subscription:
             subscription = await SubscriptionRepository.get_or_create_subscription(user_id)
@@ -52,26 +51,34 @@ class AuthMiddleware(BaseMiddleware):
                     ]
                 ])
                 
-                await event.answer(
+                text = (
                     "⏰ <b>Ваша подписка истекла!</b>\n\n"
                     "Чтобы продолжить пользоваться ботом:\n"
                     "• Купи подписку за 99₽/месяц\n"
                     "• Приведи друга и получи +5 дней бесплатно\n\n"
-                    "У тебя уже был пробный день.",
-                    reply_markup=keyboard,
-                    parse_mode="HTML"
+                    "У тебя уже был пробный день."
                 )
+                
+                # ✅ Проверка длины сообщения
+                if len(text) > 4000:
+                    text = text[:4000] + "\n\n... (сообщение обрезано)"
+                
+                await event.answer(text, reply_markup=keyboard, parse_mode="HTML")
                 return
             else:
-                await event.answer(
+                text = (
                     "🎁 <b>Добро пожаловать!</b>\n\n"
                     "Ты получил <b>1 день бесплатного</b> использования!\n"
                     "Наслаждайся всеми функциями бота.\n\n"
                     "После окончания пробного периода ты сможешь:\n"
                     "• Купить подписку за 99₽/месяц\n"
-                    "• Привести друга и получить +5 дней бесплатно",
-                    parse_mode="HTML"
+                    "• Привести друга и получить +5 дней бесплатно"
                 )
+                
+                if len(text) > 4000:
+                    text = text[:4000] + "\n\n... (сообщение обрезано)"
+                
+                await event.answer(text, parse_mode="HTML")
         
         try:
             user = await UserRepository.get_or_create(
