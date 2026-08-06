@@ -59,6 +59,51 @@ async def safe_edit_message(message, text, reply_markup=None, parse_mode="HTML")
         raise e
 
 
+# ✅ ФУНКЦИЯ ПОКАЗА ПОЛЬЗОВАТЕЛЯ
+async def show_user_info(callback: CallbackQuery, user_id: int):
+    """Показывает информацию о пользователе"""
+    async with async_session() as session:
+        user = await session.scalar(select(User).where(User.telegram_id == user_id))
+        if not user:
+            await callback.message.edit_text("❌ Пользователь не найден")
+            return
+        
+        messages_count = await session.scalar(
+            select(func.count()).select_from(SavedMessage).where(SavedMessage.user_id == user.telegram_id)
+        )
+    
+    text = f"""
+👤 <b>Пользователь</b>
+
+🆔 ID: <code>{user.telegram_id}</code>
+👤 Имя: {user.first_name or 'Не указано'}
+📛 Юзернейм: @{user.username or 'Нет'}
+✅ Активен: {'Да' if user.is_active else 'Нет'}
+👑 Админ: {'Да' if user.is_admin else 'Нет'}
+📝 Сообщений: {messages_count or 0}
+"""
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📝 Смотреть сообщения", callback_data=f"admin_view_user_{user.telegram_id}")
+        ],
+        [
+            InlineKeyboardButton(text="🚫 Забанить", callback_data=f"admin_ban_user_{user.telegram_id}"),
+            InlineKeyboardButton(text="✅ Разбанить", callback_data=f"admin_unban_user_{user.telegram_id}")
+        ],
+        [
+            InlineKeyboardButton(text="👑 Сделать админом", callback_data=f"admin_make_admin_{user.telegram_id}"),
+            InlineKeyboardButton(text="👑 Убрать админа", callback_data=f"admin_remove_admin_{user.telegram_id}")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")
+        ]
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
 # ✅ ГЛАВНОЕ МЕНЮ АДМИНА
 async def show_admin_panel(target):
     text = """
@@ -325,6 +370,7 @@ async def process_search(message: Message, state: FSMContext):
 👤 Имя: {user.first_name or 'Не указано'}
 📛 Юзернейм: @{user.username or 'Нет'}
 ✅ Активен: {'✅ Да' if user.is_active else '❌ Нет'}
+👑 Админ: {'✅ Да' if user.is_admin else '❌ Нет'}
 📝 Сообщений: {messages_count or 0}
 🗑️ Удалено: {deleted_count or 0}
 ✏️ Отредактировано: {edited_count or 0}
@@ -342,12 +388,92 @@ async def process_search(message: Message, state: FSMContext):
             InlineKeyboardButton(text="✅ Разбанить", callback_data=f"admin_unban_user_{user.telegram_id}")
         ],
         [
+            InlineKeyboardButton(text="👑 Сделать админом", callback_data=f"admin_make_admin_{user.telegram_id}"),
+            InlineKeyboardButton(text="👑 Убрать админа", callback_data=f"admin_remove_admin_{user.telegram_id}")
+        ],
+        [
+            InlineKeyboardButton(text="📋 Список админов", callback_data="admin_list_admins")
+        ],
+        [
             InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")
         ]
     ])
     
     await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
     await state.clear()
+
+
+# ✅ СДЕЛАТЬ АДМИНОМ
+@router.callback_query(lambda c: c.data.startswith("admin_make_admin_"))
+async def admin_make_admin(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    user_id = int(callback.data.split("_")[-1])
+    user = await UserRepository.update_settings(user_id, is_admin=True)
+    
+    if user:
+        await callback.answer(f"✅ Пользователь {user_id} стал администратором!", show_alert=True)
+    else:
+        await callback.answer(f"❌ Пользователь {user_id} не найден!", show_alert=True)
+    
+    await show_user_info(callback, user_id)
+
+
+# ✅ УБРАТЬ АДМИНА
+@router.callback_query(lambda c: c.data.startswith("admin_remove_admin_"))
+async def admin_remove_admin(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    user_id = int(callback.data.split("_")[-1])
+    
+    # Не даем убрать админку у владельца
+    if user_id == settings.OWNER_TELEGRAM_ID:
+        await callback.answer("❌ Нельзя убрать админку у владельца бота!", show_alert=True)
+        return
+    
+    user = await UserRepository.update_settings(user_id, is_admin=False)
+    
+    if user:
+        await callback.answer(f"✅ У пользователя {user_id} убраны права администратора!", show_alert=True)
+    else:
+        await callback.answer(f"❌ Пользователь {user_id} не найден!", show_alert=True)
+    
+    await show_user_info(callback, user_id)
+
+
+# ✅ СПИСОК АДМИНОВ
+@router.callback_query(lambda c: c.data == "admin_list_admins")
+async def admin_list_admins(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    async with async_session() as session:
+        admins = await session.scalars(
+            select(User).where(User.is_admin == True).order_by(User.created_at)
+        )
+        admins = list(admins)
+    
+    if not admins:
+        await callback.message.edit_text("📋 <b>Администраторы не найдены</b>", parse_mode="HTML")
+        await callback.answer()
+        return
+    
+    text = "👑 <b>Список администраторов</b>\n\n"
+    for admin in admins:
+        owner_mark = " ⭐" if admin.telegram_id == settings.OWNER_TELEGRAM_ID else ""
+        text += f"• {admin.telegram_id} | {admin.first_name or admin.username or 'No name'}{owner_mark}\n"
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
+    ])
+    
+    await safe_edit_message(callback.message, text, keyboard)
+    await callback.answer()
 
 
 # ✅ СПИСОК ЧАТОВ ПОЛЬЗОВАТЕЛЯ
@@ -1300,6 +1426,8 @@ async def admin_ban_user(callback: CallbackQuery):
         await callback.answer(f"✅ Пользователь {user_id} заблокирован!", show_alert=True)
     else:
         await callback.answer(f"❌ Пользователь {user_id} не найден!", show_alert=True)
+    
+    await show_user_info(callback, user_id)
 
 
 # ✅ РАЗБАН ПОЛЬЗОВАТЕЛЯ
@@ -1316,6 +1444,8 @@ async def admin_unban_user(callback: CallbackQuery):
         await callback.answer(f"✅ Пользователь {user_id} разблокирован!", show_alert=True)
     else:
         await callback.answer(f"❌ Пользователь {user_id} не найден!", show_alert=True)
+    
+    await show_user_info(callback, user_id)
 
 
 # ✅ БАН
@@ -1549,7 +1679,7 @@ async def admin_status(callback: CallbackQuery):
     await callback.answer()
 
 
-# ✅ УПРАВЛЕНИЕ ПОДПИСКАМИ (ОБРАБОТЧИКИ)
+# ✅ УПРАВЛЕНИЕ ПОДПИСКАМИ
 @router.callback_query(lambda c: c.data == "admin_subs")
 async def admin_subs_menu(callback: CallbackQuery):
     """Меню управления подписками"""
