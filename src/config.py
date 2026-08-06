@@ -35,9 +35,19 @@ class Settings:
 
     YOOKASSA_SHOP_ID: str = os.getenv("YOOKASSA_SHOP_ID", "")
     YOOKASSA_SECRET_KEY: str = os.getenv("YOOKASSA_SECRET_KEY", "")
+    YOOKASSA_WEBHOOK_SECRET: str = os.getenv("YOOKASSA_WEBHOOK_SECRET", "")
     SUBSCRIPTION_PRICE: float = float(os.getenv("SUBSCRIPTION_PRICE", "100"))
     SUBSCRIPTION_DAYS: int = int(os.getenv("SUBSCRIPTION_DAYS", "30"))
     TRIAL_DAYS: int = int(os.getenv("TRIAL_DAYS", "1"))
+
+    REFERRAL_BONUS_REFERRER_DAYS: int = int(os.getenv("REFERRAL_BONUS_REFERRER_DAYS", "3"))
+    REFERRAL_BONUS_REFERRED_DAYS: int = int(os.getenv("REFERRAL_BONUS_REFERRED_DAYS", "1"))
+
+    PAYMENT_POLL_INTERVAL_SEC: int = int(os.getenv("PAYMENT_POLL_INTERVAL_SEC", "3"))
+    PAYMENT_WEBHOOK_HOST: str = os.getenv("PAYMENT_WEBHOOK_HOST", "0.0.0.0")
+    PAYMENT_WEBHOOK_PORT: int = int(os.getenv("PAYMENT_WEBHOOK_PORT", "8080"))
+
+    SENTRY_DSN: str = os.getenv("SENTRY_DSN", "")
 
     def __post_init__(self):
         allowed = os.getenv("ALLOWED_USERS", "")

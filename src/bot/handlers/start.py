@@ -3,18 +3,64 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, C
 from aiogram.filters import Command, CommandStart
 import os
 import logging
+import re
 
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.business_repository import BusinessRepository
+from src.db.repositories.referral_repository import ReferralRepository
+from src.utils.sentry import SentryStub
 
 logger = logging.getLogger(__name__)
 
 router = Router()
 
+_REF_PATTERNS = [
+    re.compile(r"^ref_([A-Za-z0-9]+)$", re.IGNORECASE),
+    re.compile(r"^r_([A-Za-z0-9]+)$", re.IGNORECASE),
+]
+
+
+def _extract_referral_code(raw_deeplink: str) -> str | None:
+    """Извлекает ref-код из deep-link аргумента команды /start.
+
+    Поддерживаемые форматы (для t.me/bot?start=...):
+      - `ref_CODE`  → `CODE`
+      - `r_CODE`    → `CODE`
+      - просто число (legacy telegram_id)
+      - `CODE` сам по себе, если совпадает с форматом referral_code
+    """
+    if not raw_deeplink:
+        return None
+    arg = raw_deeplink.strip()
+    if not arg:
+        return None
+    for pattern in _REF_PATTERNS:
+        m = pattern.match(arg)
+        if m:
+            return m.group(1)
+    if arg.isdigit():
+        return arg
+    if len(arg) >= 6 and len(arg) <= 32 and re.match(r"^[A-Za-z0-9]+$", arg):
+        return arg
+    return None
+
 
 async def get_main_menu(user, has_business):
     sub = user.get_subscription_info()
     until = sub["subscription_until"].strftime("%d.%m.%Y") if sub["subscription_until"] else "—"
+
+    referred_note = ""
+    if user.referred_by:
+        try:
+            bonus = await ReferralRepository.get_bonus_for_referred(user.telegram_id)
+            if bonus:
+                from src.db.models import ReferralBonusStatus
+                if bonus.status == ReferralBonusStatus.HELD:
+                    referred_note = "\n🎟 <i>Вы приглашены. Бонус будет начислен после первой оплаты.</i>"
+                elif bonus.status == ReferralBonusStatus.RELEASED:
+                    referred_note = f"\n🎁 <i>Реф-бонус начислен: +{bonus.referred_days} дн.</i>"
+        except Exception:
+            pass
 
     text = f"""
 <b>SafeSaverX</b>
@@ -22,8 +68,9 @@ async def get_main_menu(user, has_business):
 👤 <b>Профиль</b>
 ▸ Статус: <b>{'активен' if user.is_active else 'неактивен'}</b>
 ▸ Подписка: <b>{sub['status']}</b> (до {until})
+▸ Реф-код: <code>{user.referral_code or '-'}</code>
 ▸ SAVE MODE: <b>{'включен' if user.savemode_enabled else 'выключен'}</b>
-▸ Business: <b>{'подключен' if has_business else 'не подключен'}</b>
+▸ Business: <b>{'подключен' if has_business else 'не подключен'}</b>{referred_note}
 
 📌 <b>Как подключить бота:</b>
 1. Нажми «📋 Скопировать юзернейм»
@@ -77,26 +124,38 @@ async def send_main_menu(target, user, has_business):
 
 @router.message(CommandStart())
 async def start_command(message: Message):
-    referrer_id = None
+    referral_code = None
     args = message.text.split(maxsplit=1)
-    if len(args) > 1 and args[1].isdigit():
-        referrer_id = int(args[1])
+    if len(args) > 1:
+        referral_code = _extract_referral_code(args[1])
 
-    user, is_new = await UserRepository.get_or_create(
-        telegram_id=message.from_user.id,
-        username=message.from_user.username,
-        first_name=message.from_user.first_name,
-        last_name=message.from_user.last_name,
-    )
+    user, is_new = None, False
+    try:
+        user, is_new = await UserRepository.get_or_create(
+            telegram_id=message.from_user.id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name,
+            last_name=message.from_user.last_name,
+            referral_code=referral_code,
+        )
+    except Exception as e:
+        SentryStub.capture_exception(e, context="start_command.get_or_create")
+        logger.exception("Ошибка get_or_create в /start: %s", e)
+        await message.answer("❌ Ошибка инициализации. Попробуйте ещё раз через несколько секунд.")
+        return
 
-    if is_new and referrer_id:
-        rewarded = await UserRepository.process_referral(message.from_user.id, referrer_id)
-        if rewarded:
-            await message.answer(
-                "🎁 <b>Реферальный бонус!</b>\n\n"
-                "Тебе начислен <b>+1 день</b> подписки за переход по реферальной ссылке.",
-                parse_mode="HTML",
-            )
+    if referral_code and is_new:
+        try:
+            resolved = await UserRepository.resolve_referral_code(referral_code)
+            if resolved and resolved != message.from_user.id:
+                await message.answer(
+                    "🔗 <b>Приглашение принято!</b>\n\n"
+                    "Вы были приглашены реферальной ссылкой. "
+                    "🎁 Бонус за приглашение будет начислен <b>после первой успешной оплаты</b> подписки.",
+                    parse_mode="HTML",
+                )
+        except Exception as e:
+            SentryStub.capture_exception(e, context="start_command.referral_greeting")
 
     connections = await BusinessRepository.get_user_connections(message.from_user.id)
     has_business = len(connections) > 0

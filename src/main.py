@@ -17,12 +17,16 @@ from src.bot.handlers import (
 )
 from src.config import settings
 from src.db.session import init_db
-from src.db.models import Payment  # noqa: F401 — регистрация модели для create_all
+from src.db.models import (  # noqa: F401 — регистрация моделей для create_all
+    Payment, Transaction, ReferralBonus,
+)
 from src.db.repositories.user_repository import UserRepository
 from src.bot.middlewares.auth import AuthMiddleware
 from src.bot.middlewares.subscription import SubscriptionMiddleware
 from src.business_bot.handlers import router as business_router
 from src.tasks import scheduled_cleanup
+from src.utils.sentry import SentryStub
+from src.services.webhook_server import start_webhook_server_async
 
 os.makedirs("logs", exist_ok=True)
 
@@ -64,11 +68,16 @@ async def main():
     logger.info("🚀 Запуск SafeSaverX...")
     logger.info(f"📌 Режим: {settings.TELEGRAM_MODE}")
 
+    SentryStub.init(settings.SENTRY_DSN)
+    if settings.SENTRY_DSN:
+        logger.info("🔧 Sentry инициализирован (stub-mode)")
+
     try:
         await init_db()
         logger.info("✅ База данных инициализирована")
     except Exception as e:
         logger.error(f"❌ Ошибка инициализации БД: {e}")
+        SentryStub.capture_exception(e, context="main.init_db")
         return
 
     if settings.OWNER_TELEGRAM_ID:
@@ -79,6 +88,7 @@ async def main():
                 logger.info(f"👤 Владелец бота: {settings.OWNER_TELEGRAM_ID}")
         except Exception as e:
             logger.error(f"❌ Ошибка создания владельца: {e}")
+            SentryStub.capture_exception(e, context="main.owner_setup")
 
     bot = Bot(
         token=settings.BOT_TOKEN,
@@ -93,12 +103,19 @@ async def main():
     asyncio.create_task(scheduled_cleanup())
     logger.info("✅ Планировщик задач запущен")
 
+    webhook_runner = await start_webhook_server_async()
+    if webhook_runner is not None:
+        logger.info("✅ Webhook-сервер платежей запущен")
+    else:
+        logger.warning("⚠️ Webhook-сервер не запущен (aiohttp не установлен или ошибка)")
+
     logger.info("✅ Бот запущен и готов к работе!")
 
     try:
         await dp.start_polling(bot, allowed_updates=allowed_updates)
     except Exception as e:
         logger.error(f"❌ Ошибка при работе бота: {e}")
+        SentryStub.capture_exception(e, context="main.dp_polling")
         raise
 
 

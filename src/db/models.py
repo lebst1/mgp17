@@ -1,11 +1,50 @@
 from datetime import datetime, timedelta
-from sqlalchemy import Column, Integer, String, BigInteger, Boolean, DateTime, ForeignKey, Text, Index, Numeric
+from enum import Enum as PyEnum
+import logging
+
+from sqlalchemy import (
+    Column, Integer, String, BigInteger, Boolean, DateTime, ForeignKey, Text,
+    Index, Numeric, UniqueConstraint, Enum as SAEnum,
+)
 from sqlalchemy.orm import relationship
+
 from src.db.session import Base
+
+logger = logging.getLogger(__name__)
+
+
+class OrderStatus(PyEnum):
+    PENDING = "pending"
+    PAID = "paid"
+    FAILED = "failed"
+    REFUNDED = "refunded"
+
+
+class ReferralBonusStatus(PyEnum):
+    HELD = "held"
+    RELEASED = "released"
+    CANCELLED = "cancelled"
+
+
+class PaymentProvider(PyEnum):
+    YOOKASSA = "yookassa"
+    STRIPE = "stripe"
+
+
+class TransactionType(PyEnum):
+    SUBSCRIPTION = "subscription"
+    REFERRAL_BONUS = "referral_bonus"
+    REFUND = "refund"
+
+
+class TransactionStatus(PyEnum):
+    PENDING = "pending"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class User(Base):
-    """Модель пользователя"""
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True)
@@ -29,11 +68,16 @@ class User(Base):
     ai_requests = Column(Integer, default=0)
 
     subscription_until = Column(DateTime, nullable=True)
+
     referral_code = Column(String(64), unique=True, nullable=True, index=True)
-    referred_by = Column(BigInteger, nullable=True)
-    referrals_count = Column(Integer, default=0)
-    referral_days_earned = Column(Integer, default=0)
-    referral_reward_claimed = Column(Boolean, default=False)
+    referred_by = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=True, index=True)
+
+    referred_by_user = relationship(
+        "User",
+        remote_side=[telegram_id],
+        foreign_keys=[referred_by],
+        backref="direct_referrals",
+    )
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -43,6 +87,25 @@ class User(Base):
     reminders = relationship("Reminder", back_populates="user")
     business_connections = relationship("BusinessConnection", back_populates="user")
     payments = relationship("Payment", back_populates="user")
+    transactions = relationship(
+        "Transaction",
+        back_populates="user",
+        foreign_keys="Transaction.user_id",
+    )
+    bonuses_as_referrer = relationship(
+        "ReferralBonus",
+        back_populates="referrer",
+        foreign_keys="ReferralBonus.referrer_id",
+    )
+    bonuses_as_referred = relationship(
+        "ReferralBonus",
+        back_populates="referred_user",
+        foreign_keys="ReferralBonus.referred_id",
+    )
+
+    __table_args__ = (
+        Index("ix_users_referred_by", "referred_by"),
+    )
 
     def has_active_subscription(self) -> bool:
         if self.subscription_until is None:
@@ -75,29 +138,111 @@ class User(Base):
 
 
 class Payment(Base):
-    """Платёж через ЮKassa"""
     __tablename__ = "payments"
 
     id = Column(Integer, primary_key=True)
     user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False, index=True)
     payment_id = Column(String(255), unique=True, nullable=False, index=True)
+    provider = Column(SAEnum(PaymentProvider, name="payment_provider_enum"), nullable=False, default=PaymentProvider.YOOKASSA)
     amount = Column(Numeric(10, 2), nullable=False)
-    status = Column(String(50), default="pending")
+    currency = Column(String(10), nullable=False, default="RUB")
+    status = Column(SAEnum(OrderStatus, name="order_status_enum"), nullable=False, default=OrderStatus.PENDING)
+    description = Column(String(500), nullable=True)
+    provider_raw = Column(Text, nullable=True)
+    paid_at = Column(DateTime, nullable=True)
+    refunded_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user = relationship("User", back_populates="payments")
+    transactions = relationship("Transaction", back_populates="payment")
 
     __table_args__ = (
-        Index("ix_payments_user_id", "user_id"),
-        Index("ix_payments_status", "status"),
+        Index("ix_payments_user_id_status", "user_id", "status"),
+        Index("ix_payments_created_at", "created_at"),
+    )
+
+    @property
+    def is_successful(self) -> bool:
+        return self.status == OrderStatus.PAID
+
+    def __repr__(self):
+        return f"<Payment {self.payment_id} {self.status.value}>"
+
+
+class Transaction(Base):
+    __tablename__ = "transactions"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False, index=True)
+    type = Column(SAEnum(TransactionType, name="transaction_type_enum"), nullable=False)
+    status = Column(SAEnum(TransactionStatus, name="transaction_status_enum"), nullable=False, default=TransactionStatus.PENDING)
+    amount = Column(Numeric(12, 2), nullable=True)
+    days_credited = Column(Integer, nullable=True)
+    payment_id = Column(Integer, ForeignKey("payments.id"), nullable=True, index=True)
+    referral_bonus_id = Column(Integer, ForeignKey("referral_bonuses.id"), nullable=True, index=True)
+    reference_id = Column(String(255), nullable=True)
+    description = Column(String(500), nullable=True)
+    metadata_ = Column("metadata", Text, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="transactions")
+    payment = relationship("Payment", back_populates="transactions")
+    referral_bonus = relationship("ReferralBonus", back_populates="transactions")
+
+    __table_args__ = (
+        Index("ix_transactions_user_type_status", "user_id", "type", "status"),
+        Index("ix_transactions_created_at", "created_at"),
     )
 
     def __repr__(self):
-        return f"<Payment {self.payment_id} {self.status}>"
+        return f"<Transaction id={self.id} type={self.type.value} status={self.status.value}>"
+
+
+class ReferralBonus(Base):
+    __tablename__ = "referral_bonuses"
+
+    id = Column(Integer, primary_key=True)
+    referrer_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False, index=True)
+    referred_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False, index=True)
+    status = Column(SAEnum(ReferralBonusStatus, name="referral_bonus_status_enum"), nullable=False, default=ReferralBonusStatus.HELD)
+    referrer_days = Column(Integer, nullable=False, default=0)
+    referred_days = Column(Integer, nullable=False, default=0)
+    triggered_by_payment_id = Column(Integer, ForeignKey("payments.id"), nullable=True, index=True)
+    released_at = Column(DateTime, nullable=True)
+    cancelled_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    referrer = relationship(
+        "User",
+        back_populates="bonuses_as_referrer",
+        foreign_keys=[referrer_id],
+    )
+    referred_user = relationship(
+        "User",
+        back_populates="bonuses_as_referred",
+        foreign_keys=[referred_id],
+    )
+    triggered_by_payment = relationship("Payment", foreign_keys=[triggered_by_payment_id])
+    transactions = relationship("Transaction", back_populates="referral_bonus")
+
+    __table_args__ = (
+        UniqueConstraint("referred_id", name="uq_referral_bonuses_referred_id"),
+        Index("ix_referral_bonuses_referrer_status", "referrer_id", "status"),
+        Index("ix_referral_bonuses_created_at", "created_at"),
+    )
+
+    def __repr__(self):
+        return (
+            f"<ReferralBonus id={self.id} referrer={self.referrer_id} "
+            f"referred={self.referred_id} status={self.status.value}>"
+        )
 
 
 class BusinessConnection(Base):
-    """Модель бизнес-подключения"""
     __tablename__ = "business_connections"
 
     id = Column(Integer, primary_key=True)
@@ -122,7 +267,6 @@ class BusinessConnection(Base):
 
 
 class SavedMessage(Base):
-    """Сохраненное сообщение"""
     __tablename__ = "saved_messages"
 
     id = Column(Integer, primary_key=True)
