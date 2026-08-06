@@ -6,10 +6,11 @@ from aiogram.fsm.state import State, StatesGroup
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.message_repository import MessageRepository
 from src.db.repositories.business_repository import BusinessRepository
+from src.db.repositories.subscription_repository import SubscriptionRepository
 from src.db.session import async_session, cleanup_old_data
 from src.config import settings
 from sqlalchemy import select, func, or_, and_, desc, case
-from src.db.models import User, SavedMessage, BusinessConnection
+from src.db.models import User, SavedMessage, BusinessConnection, Subscription, Referral
 import os
 import logging
 import time
@@ -72,6 +73,7 @@ async def show_admin_panel(target):
 ✅ <b>Разбан</b> — разблокировать пользователя
 📋 <b>Список пользователей</b> — все пользователи
 💬 <b>Чаты пользователя</b> — просмотр всех чатов
+🔐 <b>Управление подписками</b> — подписки и рефералы
 🗑️ <b>Очистка БД</b> — удалить старые данные
 💾 <b>Бэкап</b> — создать бэкап
 💚 <b>Статус</b> — состояние бота
@@ -96,6 +98,9 @@ async def show_admin_panel(target):
         ],
         [
             InlineKeyboardButton(text="💬 Чаты пользователя", callback_data="admin_chats")
+        ],
+        [
+            InlineKeyboardButton(text="🔐 Управление подписками", callback_data="admin_subs")
         ],
         [
             InlineKeyboardButton(text="🗑️ Очистка БД", callback_data="admin_cleanup"),
@@ -1542,6 +1547,259 @@ async def admin_status(callback: CallbackQuery):
     
     await safe_edit_message(callback.message, text, keyboard)
     await callback.answer()
+
+
+# ✅ УПРАВЛЕНИЕ ПОДПИСКАМИ (ОБРАБОТЧИКИ)
+@router.callback_query(lambda c: c.data == "admin_subs")
+async def admin_subs_menu(callback: CallbackQuery):
+    """Меню управления подписками"""
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    text = """
+🔐 <b>Управление подписками</b>
+
+Выберите действие:
+
+👤 <b>Информация о подписке</b> — показать подписку пользователя
+➕ <b>Начислить дни</b> — добавить дни любому пользователю
+➖ <b>Снять дни</b> — убрать дни у пользователя
+👥 <b>Список рефералов</b> — кого привел пользователь
+📊 <b>Статистика подписок</b> — общая статистика
+"""
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="👤 Информация", callback_data="admin_sub_info"),
+            InlineKeyboardButton(text="➕ Начислить дни", callback_data="admin_sub_add")
+        ],
+        [
+            InlineKeyboardButton(text="➖ Снять дни", callback_data="admin_sub_remove"),
+            InlineKeyboardButton(text="👥 Рефералы", callback_data="admin_sub_refs")
+        ],
+        [
+            InlineKeyboardButton(text="📊 Статистика", callback_data="admin_sub_stats")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")
+        ]
+    ])
+    
+    await safe_edit_message(callback.message, text, keyboard)
+
+
+# ✅ ИНФОРМАЦИЯ О ПОДПИСКЕ
+@router.callback_query(lambda c: c.data == "admin_sub_info")
+async def admin_sub_info(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await safe_edit_message(
+        callback.message,
+        "👤 <b>Информация о подписке</b>\n\n"
+        "Отправь ID пользователя.\n\n"
+        "Отправь /cancel чтобы отменить.",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminStates.waiting_for_user_id)
+    await state.update_data(action="sub_info")
+    await callback.answer()
+
+
+# ✅ НАЧИСЛИТЬ ДНИ
+@router.callback_query(lambda c: c.data == "admin_sub_add")
+async def admin_sub_add(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await safe_edit_message(
+        callback.message,
+        "➕ <b>Начислить дни</b>\n\n"
+        "Отправь ID пользователя и количество дней через пробел.\n"
+        "Пример: <code>123456789 5</code>\n\n"
+        "Отправь /cancel чтобы отменить.",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminStates.waiting_for_user_id)
+    await state.update_data(action="sub_add")
+    await callback.answer()
+
+
+# ✅ СНЯТЬ ДНИ
+@router.callback_query(lambda c: c.data == "admin_sub_remove")
+async def admin_sub_remove(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await safe_edit_message(
+        callback.message,
+        "➖ <b>Снять дни</b>\n\n"
+        "Отправь ID пользователя и количество дней через пробел.\n"
+        "Пример: <code>123456789 3</code>\n\n"
+        "Отправь /cancel чтобы отменить.",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminStates.waiting_for_user_id)
+    await state.update_data(action="sub_remove")
+    await callback.answer()
+
+
+# ✅ СПИСОК РЕФЕРАЛОВ
+@router.callback_query(lambda c: c.data == "admin_sub_refs")
+async def admin_sub_refs(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await safe_edit_message(
+        callback.message,
+        "👥 <b>Список рефералов</b>\n\n"
+        "Отправь ID пользователя, чтобы увидеть кого он привел.\n\n"
+        "Отправь /cancel чтобы отменить.",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminStates.waiting_for_user_id)
+    await state.update_data(action="sub_refs")
+    await callback.answer()
+
+
+# ✅ СТАТИСТИКА ПОДПИСОК
+@router.callback_query(lambda c: c.data == "admin_sub_stats")
+async def admin_sub_stats(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    async with async_session() as session:
+        total_subs = await session.scalar(select(func.count()).select_from(Subscription))
+        active_subs = await session.scalar(
+            select(func.count()).select_from(Subscription).where(
+                Subscription.is_active == True,
+                Subscription.expires_at > datetime.utcnow()
+            )
+        )
+        trial_subs = await session.scalar(
+            select(func.count()).select_from(Subscription).where(Subscription.subscription_type == "trial")
+        )
+        premium_subs = await session.scalar(
+            select(func.count()).select_from(Subscription).where(Subscription.subscription_type == "premium")
+        )
+        total_refs = await session.scalar(select(func.count()).select_from(Referral))
+    
+    text = f"""
+📊 <b>Статистика подписок</b>
+
+━━━━━━━━━━━━━━━━━━━━━
+📝 <b>Всего подписок:</b> {total_subs or 0}
+✅ <b>Активных:</b> {active_subs or 0}
+🎁 <b>Пробных:</b> {trial_subs or 0}
+💎 <b>Премиум:</b> {premium_subs or 0}
+👥 <b>Всего рефералов:</b> {total_refs or 0}
+━━━━━━━━━━━━━━━━━━━━━
+"""
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_subs")]
+    ])
+    
+    await safe_edit_message(callback.message, text, keyboard)
+    await callback.answer()
+
+
+# ✅ ОБРАБОТЧИК ВВОДА ДЛЯ УПРАВЛЕНИЯ ПОДПИСКАМИ
+@router.message(AdminStates.waiting_for_user_id)
+async def process_sub_management(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        await message.answer("⛔ Доступ запрещен")
+        await state.clear()
+        return
+    
+    data = await state.get_data()
+    action = data.get('action')
+    text = message.text.strip()
+    parts = text.split()
+    
+    try:
+        user_id = int(parts[0])
+        
+        if action == "sub_info":
+            subscription = await SubscriptionRepository.get_or_create_subscription(user_id)
+            days_left = (subscription.expires_at - datetime.utcnow()).days if subscription.expires_at else 0
+            
+            async with async_session() as session:
+                refs = await session.scalars(
+                    select(Referral).where(Referral.referrer_id == user_id)
+                )
+                refs = list(refs)
+            
+            text = f"""
+👤 <b>Информация о подписке</b>
+
+🆔 Пользователь: <code>{user_id}</code>
+📅 Статус: {'✅ Активна' if subscription.is_active and days_left > 0 else '❌ Неактивна'}
+📆 Действует до: {subscription.expires_at.strftime('%d.%m.%Y %H:%M') if subscription.expires_at else 'Неизвестно'}
+📝 Тип: {subscription.subscription_type}
+📊 Осталось дней: {days_left if days_left > 0 else 0}
+👥 Привел друзей: {len(refs)}
+"""
+            
+            await message.answer(text, parse_mode="HTML")
+            
+        elif action == "sub_add":
+            if len(parts) < 2:
+                await message.answer("❌ Нужно указать количество дней. Пример: 123456789 5")
+                return
+            days = int(parts[1])
+            subscription = await SubscriptionRepository.extend_subscription(user_id, days, "admin_add")
+            await message.answer(f"✅ Пользователю {user_id} начислено {days} дней! Подписка активна до {subscription.expires_at.strftime('%d.%m.%Y %H:%M')}")
+            
+        elif action == "sub_remove":
+            if len(parts) < 2:
+                await message.answer("❌ Нужно указать количество дней. Пример: 123456789 3")
+                return
+            days = int(parts[1])
+            subscription = await SubscriptionRepository.get_or_create_subscription(user_id)
+            if subscription.expires_at:
+                new_expires = subscription.expires_at - timedelta(days=days)
+                if new_expires < datetime.utcnow():
+                    new_expires = datetime.utcnow()
+                subscription.expires_at = new_expires
+                async with async_session() as session:
+                    await session.merge(subscription)
+                    await session.commit()
+                await message.answer(f"✅ У пользователя {user_id} снято {days} дней! Подписка активна до {subscription.expires_at.strftime('%d.%m.%Y %H:%M')}")
+            else:
+                await message.answer("❌ У пользователя нет активной подписки")
+            
+        elif action == "sub_refs":
+            async with async_session() as session:
+                refs = await session.scalars(
+                    select(Referral).where(Referral.referrer_id == user_id)
+                )
+                refs = list(refs)
+            
+            if not refs:
+                await message.answer(f"👥 Пользователь {user_id} никого не привел.")
+                return
+            
+            text = f"👥 <b>Рефералы пользователя {user_id}</b>\n\n"
+            for ref in refs:
+                referred_user = await UserRepository.get_by_id(ref.referred_id)
+                name = referred_user.first_name or referred_user.username or "Пользователь" if referred_user else "Неизвестно"
+                text += f"• {ref.referred_id} | {name} | {ref.created_at.strftime('%d.%m.%Y')}\n"
+            
+            await message.answer(text, parse_mode="HTML")
+        
+    except ValueError:
+        await message.answer("❌ Неверный формат. Отправь ID пользователя.")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
+    
+    await state.clear()
 
 
 # ✅ НАЗАД
