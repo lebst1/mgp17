@@ -83,6 +83,7 @@ async def get_main_menu(user, has_business):
 👤 <b>Профиль</b>
 ▸ Статус: <b>{'активен' if user.is_active else 'неактивен'}</b>
 ▸ SAVE MODE: <b>{'включен' if user.savemode_enabled else 'выключен'}</b>
+▸ Business: <b>{'подключен' if has_business else 'не подключен'}</b>
 ▸ Подписка: {status_emoji} <b>{'активна' if days_left > 0 else 'неактивна'}</b>
 ▸ Осталось дней: <b>{days_left if days_left > 0 else '0'}</b>
 
@@ -91,7 +92,7 @@ async def get_main_menu(user, has_business):
 2. Открой Настройки Telegram → Редактирование профиля
 3. Выбери «Автоматизация действий»
 4. Вставь скопированный юзернейм
-5. Дай разрешения на все сообщения!
+5. Дай ВСЕ разрешения!
 
 <b>Что умеет бот:</b>
 • Присылает уведомления, когда собеседник удаляет сообщение
@@ -162,6 +163,7 @@ async def send_main_menu(target, user, has_business):
 
 @router.message(Command("start"))
 async def start_command(message: Message):
+    # ✅ ПРОВЕРЯЕМ РЕФЕРАЛЬНУЮ ССЫЛКУ
     args = message.text.split()
     referrer_id = None
     
@@ -171,6 +173,7 @@ async def start_command(message: Message):
         except ValueError:
             pass
     
+    # Создаем пользователя
     user = await UserRepository.get_or_create(
         telegram_id=message.from_user.id,
         username=message.from_user.username,
@@ -227,14 +230,6 @@ async def start_command(message: Message):
                 await bot.session.close()
             except Exception as e:
                 logger.error(f"Ошибка отправки уведомления рефереру: {e}")
-    
-    # ✅ СОЗДАЕМ ПОДПИСКУ (если её нет)
-    subscription = await SubscriptionRepository.get_or_create_subscription(message.from_user.id)
-    
-    connections = await BusinessRepository.get_user_connections(message.from_user.id)
-    has_business = len(connections) > 0
-    
-    await send_main_menu(message, user, has_business)
     
     # ✅ СОЗДАЕМ ПОДПИСКУ (если её нет)
     subscription = await SubscriptionRepository.get_or_create_subscription(message.from_user.id)
