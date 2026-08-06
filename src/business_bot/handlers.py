@@ -1,7 +1,6 @@
 import logging
 import json
 import os
-import asyncio
 from aiogram import Router, F, Bot
 from aiogram.types import Message, BusinessConnection, BusinessMessagesDeleted, FSInputFile
 from aiogram.filters import Command
@@ -20,7 +19,6 @@ MAX_FILE_SIZE = settings.MAX_MEDIA_SIZE_MB * 1024 * 1024
 
 
 async def download_media(bot: Bot, file_id: str) -> str:
-    """Скачивает медиафайл и возвращает путь к нему"""
     try:
         os.makedirs(MEDIA_DIR, exist_ok=True)
         file = await bot.get_file(file_id)
@@ -40,8 +38,6 @@ async def download_media(bot: Bot, file_id: str) -> str:
 
 
 async def send_deleted_notification(bot: Bot, user_id: int, saved_msg):
-    """Уведомление об удалении с поддержкой всех типов медиа"""
-    
     username = saved_msg.from_username or 'пользователь'
     text = f"""<b>{username}</b>
 
@@ -83,8 +79,6 @@ async def send_deleted_notification(bot: Bot, user_id: int, saved_msg):
 
 
 async def send_edit_notification(bot: Bot, user_id: int, saved_msg, old_text: str, new_text: str):
-    """Уведомление о правке с поддержкой всех типов медиа"""
-    
     username = saved_msg.from_username or 'пользователь'
     text = f"""<b>{username}</b>
 
@@ -324,7 +318,6 @@ async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
 
 @router.edited_business_message()
 async def handle_business_edited(message: Message):
-    """Обработчик отредактированных бизнес-сообщений"""
     if not message.from_user:
         return
     

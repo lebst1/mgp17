@@ -9,7 +9,6 @@ class MessageRepository:
     
     @staticmethod
     async def save_message(data: dict) -> SavedMessage:
-        """Сохранить сообщение"""
         async with async_session() as session:
             message = SavedMessage(**data)
             session.add(message)
@@ -19,7 +18,6 @@ class MessageRepository:
     
     @staticmethod
     async def get_recent_deleted(user_id: int, limit: int = 10) -> List[SavedMessage]:
-        """Получить последние удаленные сообщения пользователя"""
         async with async_session() as session:
             result = await session.execute(
                 select(SavedMessage)
@@ -36,7 +34,6 @@ class MessageRepository:
     
     @staticmethod
     async def search_messages(user_id: int, query: str, limit: int = 10) -> List[SavedMessage]:
-        """Поиск по сообщениям"""
         async with async_session() as session:
             result = await session.execute(
                 select(SavedMessage)
@@ -57,7 +54,6 @@ class MessageRepository:
     
     @staticmethod
     async def mark_as_deleted(message_id: int, chat_id: int, user_id: int) -> Optional[SavedMessage]:
-        """Пометить сообщение как удаленное"""
         async with async_session() as session:
             result = await session.execute(
                 select(SavedMessage)
@@ -80,7 +76,6 @@ class MessageRepository:
     
     @staticmethod
     async def get_by_id(message_id: int, user_id: int) -> Optional[SavedMessage]:
-        """Получить сообщение по ID"""
         async with async_session() as session:
             result = await session.execute(
                 select(SavedMessage)
@@ -93,10 +88,8 @@ class MessageRepository:
             )
             return result.scalar_one_or_none()
     
-    # ✅ НОВЫЙ МЕТОД ДЛЯ ПОИСКА ПО ID И ЧАТУ
     @staticmethod
     async def get_by_id_and_chat(message_id: int, chat_id: int, user_id: int) -> Optional[SavedMessage]:
-        """Получить сообщение по ID, чату и пользователю"""
         async with async_session() as session:
             result = await session.execute(
                 select(SavedMessage)

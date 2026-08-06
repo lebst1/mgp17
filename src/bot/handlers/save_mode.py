@@ -9,7 +9,6 @@ router = Router()
 
 @router.message(Command("deleted"))
 async def show_deleted(message: Message):
-    """Показать последние удаленные сообщения"""
     messages = await MessageRepository.get_recent_deleted(
         user_id=message.from_user.id,
         limit=10
@@ -34,7 +33,6 @@ async def show_deleted(message: Message):
 
 @router.message(Command("search"))
 async def search_messages(message: Message):
-    """Поиск по сохраненным сообщениям"""
     query = message.text.replace("/search", "").strip()
     
     if not query:
@@ -64,25 +62,21 @@ async def search_messages(message: Message):
 
 @router.message(Command("edits"))
 async def show_edits(message: Message):
-    """Показать последние отредактированные сообщения"""
     await message.answer("✏️ Функция в разработке")
 
 
 @router.message(Command("media"))
 async def show_media(message: Message):
-    """Показать последние сохраненные медиа"""
     await message.answer("🖼️ Функция в разработке")
 
 
 @router.message(Command("savemode_settings"))
 async def savemode_settings(message: Message):
-    """Настройки SAVE MODE"""
     await message.answer("⚙️ Настройки SAVE MODE\n\n/savemode on - включить\n/savemode off - выключить")
 
 
 @router.message(Command("savemode"))
 async def toggle_savemode(message: Message):
-    """Включить/выключить SAVE MODE"""
     args = message.text.split()
     
     if len(args) < 2:

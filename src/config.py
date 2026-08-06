@@ -28,15 +28,6 @@ class Settings:
     
     CLEANUP_DAYS: int = int(os.getenv("CLEANUP_DAYS", 30))
     
-    REQUIRED_CHANNEL_ID: int = int(os.getenv("REQUIRED_CHANNEL_ID", 0))
-    REQUIRED_CHANNEL_URL: str = os.getenv("REQUIRED_CHANNEL_URL", "")
-    
-    # ✅ ДОБАВЛЯЕМ BOT_USERNAME
-    BOT_USERNAME: str = os.getenv("BOT_USERNAME", "laosllebot")
-    
-    # ✅ ДОБАВЛЯЕМ ЦЕНУ ПОДПИСКИ
-    SUBSCRIPTION_PRICE: int = int(os.getenv("SUBSCRIPTION_PRICE", 99))
-    
     REPEAT_DELAY_MIN_SECONDS: int = int(os.getenv("REPEAT_DELAY_MIN_SECONDS", 1))
     REPEAT_DELAY_MAX_SECONDS: int = int(os.getenv("REPEAT_DELAY_MAX_SECONDS", 3))
     TIMEZONE: str = os.getenv("TIMEZONE", "UTC")

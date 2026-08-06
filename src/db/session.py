@@ -33,7 +33,6 @@ async def get_session() -> AsyncSession:
 
 
 async def init_db():
-    """Инициализация и миграция базы данных"""
     logger.info("🔄 Проверка схемы базы данных...")
     
     try:
@@ -105,7 +104,6 @@ async def init_db():
         
         logger.info("✅ Миграция схемы завершена")
         
-        # Запускаем автоочистку
         await cleanup_old_data()
         
     except Exception as e:
@@ -114,7 +112,6 @@ async def init_db():
 
 
 async def cleanup_old_data():
-    """Очистка старых данных"""
     logger.info("🧹 Запуск очистки старых данных...")
     
     try:
@@ -144,7 +141,6 @@ async def cleanup_old_data():
                 
                 logger.info(f"✅ Удалено {removed_count} старых медиа-файлов")
         
-        # VACUUM вне транзакции
         try:
             await engine.dispose()
             db_path = settings.DATABASE_URL.replace("sqlite+aiosqlite:///", "")

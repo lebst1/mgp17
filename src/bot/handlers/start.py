@@ -1,82 +1,17 @@
-from aiogram import Router, Bot
-from aiogram.types import (
-    Message,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    CallbackQuery,
-    FSInputFile,
-    CopyTextButton
-)
+from aiogram import Router
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile
 from aiogram.filters import Command
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.business_repository import BusinessRepository
-from src.db.repositories.subscription_repository import SubscriptionRepository
-from src.config import settings
 import os
 import logging
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 router = Router()
 
 
-@router.callback_query(lambda c: c.data == "check_subscription")
-async def check_subscription(callback: CallbackQuery, bot: Bot):
-    user_id = callback.from_user.id
-    
-    try:
-        member = await bot.get_chat_member(
-            chat_id=settings.REQUIRED_CHANNEL_ID,
-            user_id=user_id
-        )
-        
-        if member.status in ['left', 'kicked']:
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="📢 Подписаться на канал",
-                        url=settings.REQUIRED_CHANNEL_URL
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text="🔄 Проверить подписку",
-                        callback_data="check_subscription"
-                    )
-                ]
-            ])
-            await callback.message.edit_text(
-                f"📢 <b>Вы ещё не подписаны на канал!</b>\n\n"
-                f"Подпишитесь и нажмите «Проверить подписку».",
-                reply_markup=keyboard,
-                parse_mode="HTML"
-            )
-        else:
-            await callback.message.edit_text(
-                "✅ <b>Спасибо за подписку!</b>\n\n"
-                "Теперь вы можете пользоваться ботом.\n"
-                "Напишите /start, чтобы начать.",
-                parse_mode="HTML"
-            )
-            
-    except Exception as e:
-        logger.error(f"❌ Ошибка проверки подписки: {e}")
-        await callback.answer("❌ Ошибка проверки, попробуйте позже.", show_alert=True)
-    
-    await callback.answer()
-
-
 async def get_main_menu(user, has_business):
-    # ✅ Получаем подписку
-    subscription = await SubscriptionRepository.get_or_create_subscription(user.telegram_id)
-    
-    days_left = 0
-    if subscription.expires_at:
-        days_left = (subscription.expires_at - datetime.utcnow()).days
-    
-    status_emoji = "✅" if subscription.is_active and days_left > 0 else "❌"
-    
     text = f"""
 <b>SafeSaverX</b>
 
@@ -84,8 +19,6 @@ async def get_main_menu(user, has_business):
 ▸ Статус: <b>{'активен' if user.is_active else 'неактивен'}</b>
 ▸ SAVE MODE: <b>{'включен' if user.savemode_enabled else 'выключен'}</b>
 ▸ Business: <b>{'подключен' if has_business else 'не подключен'}</b>
-▸ Подписка: {status_emoji} <b>{'активна' if days_left > 0 else 'неактивна'}</b>
-▸ Осталось дней: <b>{days_left if days_left > 0 else '0'}</b>
 
 📌 <b>Как подключить бота:</b>
 1. Нажми «📋 Скопировать юзернейм»
@@ -102,45 +35,19 @@ async def get_main_menu(user, has_business):
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(
-                text="📋 Скопировать юзернейм",
-                copy_text=CopyTextButton(text="@laosllebot")
-            )
+            InlineKeyboardButton(text="📋 Скопировать юзернейм", callback_data="copy_username")
         ],
         [
-            InlineKeyboardButton(
-                text="✏️ Редактирование профиля",
-                callback_data="edit_profile"
-            )
+            InlineKeyboardButton(text="✏️ Редактирование профиля", callback_data="edit_profile")
         ],
         [
-            InlineKeyboardButton(
-                text="❓ Описание команд",
-                callback_data="show_help"
-            ),
-            InlineKeyboardButton(
-                text="⭐ Важное",
-                callback_data="important"
-            )
+            InlineKeyboardButton(text="❓ Описание команд", callback_data="show_help"),
+            InlineKeyboardButton(text="⭐ Важное", callback_data="important")
         ],
         [
-            InlineKeyboardButton(
-                text="⚙️ Настройки",
-                callback_data="settings"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text="💳 Подписка",
-                callback_data="subscribe_info"
-            )
+            InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings")
         ]
     ])
-    
-    if settings.REQUIRED_CHANNEL_URL:
-        keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text="📢 Наш канал", url=settings.REQUIRED_CHANNEL_URL)
-        ])
     
     return text, keyboard
 
@@ -163,14 +70,14 @@ async def send_main_menu(target, user, has_business):
 
 @router.message(Command("start"))
 async def start_command(message: Message):
-    user = await UserRepository.get_or_create(
-        telegram_id=message.from_user.id,
-        username=message.from_user.username,
-        first_name=message.from_user.first_name,
-        last_name=message.from_user.last_name
-    )
-    
-    subscription = await SubscriptionRepository.get_or_create_subscription(message.from_user.id)
+    user = await UserRepository.get_by_id(message.from_user.id)
+    if not user:
+        user = await UserRepository.get_or_create(
+            telegram_id=message.from_user.id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name,
+            last_name=message.from_user.last_name
+        )
     
     connections = await BusinessRepository.get_user_connections(message.from_user.id)
     has_business = len(connections) > 0
@@ -204,7 +111,6 @@ async def show_help(callback: CallbackQuery):
 /settings — Настройки
 /savemode on — Включить SAVE MODE
 /savemode off — Выключить SAVE MODE
-/subscribe — Информация о подписке
 """
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")]
@@ -226,7 +132,7 @@ async def important(callback: CallbackQuery):
 
 1️⃣ Дай ВСЕ разрешения на работу с сообщениями
 2️⃣ Бот присылает уведомления при удалении/правке
-3️⃣ Сохраняет фото, голосовые и видео
+3️⃣ Сохраняет сгорающие фото, голосовые и видео
 """
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")]
@@ -324,27 +230,6 @@ async def savemode_on(callback: CallbackQuery):
 @router.callback_query(lambda c: c.data == "savemode_off")
 async def savemode_off(callback: CallbackQuery):
     await callback.answer("❌ SAVE MODE выключен! Используй /savemode off")
-
-
-@router.callback_query(lambda c: c.data == "subscribe_info")
-async def subscribe_info_callback(callback: CallbackQuery):
-    await callback.answer()
-    from .subscription import subscribe_info
-    await subscribe_info(callback.message)
-
-
-@router.callback_query(lambda c: c.data == "subscribe_buy")
-async def subscribe_buy_callback(callback: CallbackQuery):
-    await callback.answer()
-    from .subscription import subscribe_buy
-    await subscribe_buy(callback)
-
-
-@router.callback_query(lambda c: c.data == "subscribe_back")
-async def subscribe_back_callback(callback: CallbackQuery):
-    await callback.answer()
-    from .subscription import subscribe_back
-    await subscribe_back(callback)
 
 
 @router.message(Command("help"))

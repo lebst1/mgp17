@@ -13,7 +13,6 @@ class BusinessRepository:
     
     @staticmethod
     async def save_connection(connection_id: str, user_telegram_id: int, is_enabled: bool = True) -> BusinessConnection:
-        """Сохранить или обновить бизнес-подключение"""
         async with async_session() as session:
             result = await session.execute(
                 select(BusinessConnection).where(
@@ -45,7 +44,6 @@ class BusinessRepository:
     
     @staticmethod
     async def get_user_by_connection(connection_id: str) -> Optional[User]:
-        """Получить пользователя по ID подключения"""
         async with async_session() as session:
             result = await session.execute(
                 select(User)
@@ -56,7 +54,6 @@ class BusinessRepository:
     
     @staticmethod
     async def get_connection(connection_id: str) -> Optional[BusinessConnection]:
-        """Получить подключение по ID"""
         async with async_session() as session:
             result = await session.execute(
                 select(BusinessConnection).where(
@@ -65,12 +62,9 @@ class BusinessRepository:
             )
             return result.scalar_one_or_none()
     
-    # ✅ НОВЫЙ МЕТОД
     @staticmethod
     async def get_or_create_connection_by_user(connection_id: str, user_id: int) -> BusinessConnection:
-        """Получить или создать подключение по connection_id и user_id"""
         async with async_session() as session:
-            # Ищем существующее
             result = await session.execute(
                 select(BusinessConnection).where(
                     BusinessConnection.connection_id == connection_id
@@ -81,7 +75,6 @@ class BusinessRepository:
             if connection:
                 return connection
             
-            # Если не нашли — создаем новое
             logger.info(f"💾 Создаем новый connection_id: {connection_id} для пользователя {user_id}")
             connection = BusinessConnection(
                 connection_id=connection_id,
@@ -98,7 +91,6 @@ class BusinessRepository:
     
     @staticmethod
     async def update_activity(connection_id: str):
-        """Обновить время последней активности"""
         async with async_session() as session:
             result = await session.execute(
                 select(BusinessConnection).where(
@@ -113,7 +105,6 @@ class BusinessRepository:
     
     @staticmethod
     async def get_user_connections(user_telegram_id: int) -> List[BusinessConnection]:
-        """Получить все подключения пользователя"""
         async with async_session() as session:
             result = await session.execute(
                 select(BusinessConnection).where(
