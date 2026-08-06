@@ -37,6 +37,11 @@ class AdminStates(StatesGroup):
     waiting_for_chat_select = State()
     waiting_for_chat_search = State()
     waiting_for_chat_message = State()
+    waiting_for_sub_info = State()
+    waiting_for_sub_add = State()
+    waiting_for_sub_remove = State()
+    waiting_for_sub_refs = State()
+    waiting_for_chat_page = State()
 
 
 # ✅ ПРОВЕРКА АДМИНА
@@ -430,7 +435,6 @@ async def admin_remove_admin(callback: CallbackQuery):
     
     user_id = int(callback.data.split("_")[-1])
     
-    # Не даем убрать админку у владельца
     if user_id == settings.OWNER_TELEGRAM_ID:
         await callback.answer("❌ Нельзя убрать админку у владельца бота!", show_alert=True)
         return
@@ -476,6 +480,300 @@ async def admin_list_admins(callback: CallbackQuery):
     await callback.answer()
 
 
+# ✅ УПРАВЛЕНИЕ ПОДПИСКАМИ
+@router.callback_query(lambda c: c.data == "admin_subs")
+async def admin_subs_menu(callback: CallbackQuery):
+    """Меню управления подписками"""
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    text = """
+🔐 <b>Управление подписками</b>
+
+Выберите действие:
+
+👤 <b>Информация о подписке</b> — показать подписку пользователя
+➕ <b>Начислить дни</b> — добавить дни любому пользователю
+➖ <b>Снять дни</b> — убрать дни у пользователя
+👥 <b>Список рефералов</b> — кого привел пользователь
+📊 <b>Статистика подписок</b> — общая статистика
+"""
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="👤 Информация", callback_data="admin_sub_info"),
+            InlineKeyboardButton(text="➕ Начислить дни", callback_data="admin_sub_add")
+        ],
+        [
+            InlineKeyboardButton(text="➖ Снять дни", callback_data="admin_sub_remove"),
+            InlineKeyboardButton(text="👥 Рефералы", callback_data="admin_sub_refs")
+        ],
+        [
+            InlineKeyboardButton(text="📊 Статистика", callback_data="admin_sub_stats")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")
+        ]
+    ])
+    
+    await safe_edit_message(callback.message, text, keyboard)
+
+
+# ✅ ИНФОРМАЦИЯ О ПОДПИСКЕ
+@router.callback_query(lambda c: c.data == "admin_sub_info")
+async def admin_sub_info(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await safe_edit_message(
+        callback.message,
+        "👤 <b>Информация о подписке</b>\n\n"
+        "Отправь ID пользователя.\n\n"
+        "Отправь /cancel чтобы отменить.",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminStates.waiting_for_sub_info)
+    await callback.answer()
+
+
+# ✅ НАЧИСЛИТЬ ДНИ
+@router.callback_query(lambda c: c.data == "admin_sub_add")
+async def admin_sub_add(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await safe_edit_message(
+        callback.message,
+        "➕ <b>Начислить дни</b>\n\n"
+        "Отправь ID пользователя и количество дней через пробел.\n"
+        "Пример: <code>123456789 5</code>\n\n"
+        "Отправь /cancel чтобы отменить.",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminStates.waiting_for_sub_add)
+    await callback.answer()
+
+
+# ✅ СНЯТЬ ДНИ
+@router.callback_query(lambda c: c.data == "admin_sub_remove")
+async def admin_sub_remove(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await safe_edit_message(
+        callback.message,
+        "➖ <b>Снять дни</b>\n\n"
+        "Отправь ID пользователя и количество дней через пробел.\n"
+        "Пример: <code>123456789 3</code>\n\n"
+        "Отправь /cancel чтобы отменить.",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminStates.waiting_for_sub_remove)
+    await callback.answer()
+
+
+# ✅ СПИСОК РЕФЕРАЛОВ
+@router.callback_query(lambda c: c.data == "admin_sub_refs")
+async def admin_sub_refs(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await safe_edit_message(
+        callback.message,
+        "👥 <b>Список рефералов</b>\n\n"
+        "Отправь ID пользователя, чтобы увидеть кого он привел.\n\n"
+        "Отправь /cancel чтобы отменить.",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminStates.waiting_for_sub_refs)
+    await callback.answer()
+
+
+# ✅ СТАТИСТИКА ПОДПИСОК
+@router.callback_query(lambda c: c.data == "admin_sub_stats")
+async def admin_sub_stats(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    async with async_session() as session:
+        total_subs = await session.scalar(select(func.count()).select_from(Subscription))
+        active_subs = await session.scalar(
+            select(func.count()).select_from(Subscription).where(
+                Subscription.is_active == True,
+                Subscription.expires_at > datetime.utcnow()
+            )
+        )
+        trial_subs = await session.scalar(
+            select(func.count()).select_from(Subscription).where(Subscription.subscription_type == "trial")
+        )
+        premium_subs = await session.scalar(
+            select(func.count()).select_from(Subscription).where(Subscription.subscription_type == "premium")
+        )
+        total_refs = await session.scalar(select(func.count()).select_from(Referral))
+    
+    text = f"""
+📊 <b>Статистика подписок</b>
+
+━━━━━━━━━━━━━━━━━━━━━
+📝 <b>Всего подписок:</b> {total_subs or 0}
+✅ <b>Активных:</b> {active_subs or 0}
+🎁 <b>Пробных:</b> {trial_subs or 0}
+💎 <b>Премиум:</b> {premium_subs or 0}
+👥 <b>Всего рефералов:</b> {total_refs or 0}
+━━━━━━━━━━━━━━━━━━━━━
+"""
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_subs")]
+    ])
+    
+    await safe_edit_message(callback.message, text, keyboard)
+    await callback.answer()
+
+
+# ✅ ИНФОРМАЦИЯ О ПОДПИСКЕ (ОБРАБОТЧИК)
+@router.message(AdminStates.waiting_for_sub_info)
+async def process_sub_info(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        await message.answer("⛔ Доступ запрещен")
+        await state.clear()
+        return
+    
+    try:
+        user_id = int(message.text.strip())
+        subscription = await SubscriptionRepository.get_or_create_subscription(user_id)
+        days_left = (subscription.expires_at - datetime.utcnow()).days if subscription.expires_at else 0
+        
+        async with async_session() as session:
+            refs = await session.scalars(
+                select(Referral).where(Referral.referrer_id == user_id)
+            )
+            refs = list(refs)
+        
+        text = f"""
+👤 <b>Информация о подписке</b>
+
+🆔 Пользователь: <code>{user_id}</code>
+📅 Статус: {'✅ Активна' if subscription.is_active and days_left > 0 else '❌ Неактивна'}
+📆 Действует до: {subscription.expires_at.strftime('%d.%m.%Y %H:%M') if subscription.expires_at else 'Неизвестно'}
+📝 Тип: {subscription.subscription_type}
+📊 Осталось дней: {days_left if days_left > 0 else 0}
+👥 Привел друзей: {len(refs)}
+"""
+        await message.answer(text, parse_mode="HTML")
+    except ValueError:
+        await message.answer("❌ Неверный формат. Отправь ID пользователя.")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
+    
+    await state.clear()
+
+
+# ✅ НАЧИСЛИТЬ ДНИ (ОБРАБОТЧИК)
+@router.message(AdminStates.waiting_for_sub_add)
+async def process_sub_add(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        await message.answer("⛔ Доступ запрещен")
+        await state.clear()
+        return
+    
+    parts = message.text.strip().split()
+    if len(parts) < 2:
+        await message.answer("❌ Нужно указать ID и количество дней. Пример: 123456789 5")
+        await state.clear()
+        return
+    
+    try:
+        user_id = int(parts[0])
+        days = int(parts[1])
+        subscription = await SubscriptionRepository.extend_subscription(user_id, days, "admin_add")
+        await message.answer(f"✅ Пользователю {user_id} начислено {days} дней! Подписка активна до {subscription.expires_at.strftime('%d.%m.%Y %H:%M')}")
+    except ValueError:
+        await message.answer("❌ Неверный формат. Отправь ID и количество дней через пробел.")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
+    
+    await state.clear()
+
+
+# ✅ СНЯТЬ ДНИ (ОБРАБОТЧИК)
+@router.message(AdminStates.waiting_for_sub_remove)
+async def process_sub_remove(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        await message.answer("⛔ Доступ запрещен")
+        await state.clear()
+        return
+    
+    parts = message.text.strip().split()
+    if len(parts) < 2:
+        await message.answer("❌ Нужно указать ID и количество дней. Пример: 123456789 3")
+        await state.clear()
+        return
+    
+    try:
+        user_id = int(parts[0])
+        days = int(parts[1])
+        subscription = await SubscriptionRepository.get_or_create_subscription(user_id)
+        if subscription.expires_at:
+            new_expires = subscription.expires_at - timedelta(days=days)
+            if new_expires < datetime.utcnow():
+                new_expires = datetime.utcnow()
+            subscription.expires_at = new_expires
+            async with async_session() as session:
+                await session.merge(subscription)
+                await session.commit()
+            await message.answer(f"✅ У пользователя {user_id} снято {days} дней! Подписка активна до {subscription.expires_at.strftime('%d.%m.%Y %H:%M')}")
+        else:
+            await message.answer("❌ У пользователя нет активной подписки")
+    except ValueError:
+        await message.answer("❌ Неверный формат. Отправь ID и количество дней через пробел.")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
+    
+    await state.clear()
+
+
+# ✅ СПИСОК РЕФЕРАЛОВ (ОБРАБОТЧИК)
+@router.message(AdminStates.waiting_for_sub_refs)
+async def process_sub_refs(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        await message.answer("⛔ Доступ запрещен")
+        await state.clear()
+        return
+    
+    try:
+        user_id = int(message.text.strip())
+        async with async_session() as session:
+            refs = await session.scalars(
+                select(Referral).where(Referral.referrer_id == user_id)
+            )
+            refs = list(refs)
+        
+        if not refs:
+            await message.answer(f"👥 Пользователь {user_id} никого не привел.")
+            await state.clear()
+            return
+        
+        text = f"👥 <b>Рефералы пользователя {user_id}</b>\n\n"
+        for ref in refs:
+            referred_user = await UserRepository.get_by_id(ref.referred_id)
+            name = referred_user.first_name or referred_user.username or "Пользователь" if referred_user else "Неизвестно"
+            text += f"• {ref.referred_id} | {name} | {ref.created_at.strftime('%d.%m.%Y')}\n"
+        await message.answer(text, parse_mode="HTML")
+    except ValueError:
+        await message.answer("❌ Неверный формат. Отправь ID пользователя.")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
+    
+    await state.clear()
+
+
 # ✅ СПИСОК ЧАТОВ ПОЛЬЗОВАТЕЛЯ
 @router.callback_query(lambda c: c.data.startswith("admin_chats_user_"))
 async def admin_chats_user(callback: CallbackQuery):
@@ -484,7 +782,7 @@ async def admin_chats_user(callback: CallbackQuery):
         return
     
     user_id = int(callback.data.split("_")[-1])
-    await show_chats_list(callback.message, user_id)
+    await show_chats_list(callback.message, user_id, 1)
     await callback.answer()
 
 
@@ -524,11 +822,25 @@ async def process_chat_select(message: Message, state: FSMContext):
     
     try:
         user_id = int(text)
-        await show_chats_list(message, user_id)
+        await show_chats_list(message, user_id, 1)
     except ValueError:
         await message.answer("❌ Неверный формат. Отправь ID пользователя или 'поиск: название'.")
     
     await state.clear()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin_chats_page_"))
+async def admin_chats_page(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    parts = callback.data.split("_")
+    user_id = int(parts[3])
+    page = int(parts[4])
+    
+    await show_chats_list(callback.message, user_id, page)
+    await callback.answer()
 
 
 async def show_chats_search(target, search_query: str):
@@ -587,14 +899,27 @@ async def show_chats_search(target, search_query: str):
     await target.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 
-async def show_chats_list(target, user_id: int):
-    """Показывает список всех чатов пользователя"""
+async def show_chats_list(target, user_id: int, page: int = 1):
+    """Показывает список всех чатов пользователя с пагинацией"""
+    CHATS_PER_PAGE = 10
     
     async with async_session() as session:
         user = await session.scalar(select(User).where(User.telegram_id == user_id))
         if not user:
             await target.answer("❌ Пользователь не найден")
             return
+        
+        # Получаем общее количество чатов
+        total_chats = await session.scalar(
+            select(func.count()).select_from(SavedMessage)
+            .where(SavedMessage.user_id == user_id)
+            .group_by(SavedMessage.chat_id)
+        )
+        total_chats = total_chats or 0
+        total_pages = (total_chats + CHATS_PER_PAGE - 1) // CHATS_PER_PAGE if total_chats > 0 else 1
+        
+        # Пагинация
+        offset = (page - 1) * CHATS_PER_PAGE
         
         deleted_count = func.sum(
             case((SavedMessage.is_deleted == True, 1), else_=0)
@@ -616,6 +941,8 @@ async def show_chats_list(target, user_id: int):
             .where(SavedMessage.user_id == user_id)
             .group_by(SavedMessage.chat_id, SavedMessage.chat_title)
             .order_by(func.max(SavedMessage.saved_at).desc())
+            .offset(offset)
+            .limit(CHATS_PER_PAGE)
         )
         chats = chats.all()
     
@@ -624,18 +951,18 @@ async def show_chats_list(target, user_id: int):
         return
     
     text = f"""
-💬 <b>Чаты пользователя</b>
-
+📋 <b>Чаты пользователя</b>
 👤 <b>{user.first_name or user.username or 'Пользователь'}</b>
 🆔 <code>{user.telegram_id}</code>
-📊 <b>Всего чатов:</b> {len(chats)}
+📊 <b>Всего чатов:</b> {total_chats}
+📄 <b>Страница {page} из {total_pages}</b>
 
 ➖➖➖➖➖➖➖➖➖➖➖➖
 """
     
     keyboard_buttons = []
     
-    for chat in chats:
+    for i, chat in enumerate(chats, 1):
         chat_title = chat.chat_title or f"Чат {chat.chat_id}"
         if len(chat_title) > 20:
             chat_title = chat_title[:17] + "..."
@@ -658,7 +985,7 @@ async def show_chats_list(target, user_id: int):
             else:
                 last_active = " 🔴"
         
-        button_text = f"💬 {chat_title} ({chat.count}) {status}{last_active}".strip()
+        button_text = f"#{i + offset} 💬 {chat_title} ({chat.count}) {status}{last_active}".strip()
         
         keyboard_buttons.append([
             InlineKeyboardButton(
@@ -666,6 +993,19 @@ async def show_chats_list(target, user_id: int):
                 callback_data=f"admin_chat_open_{user_id}_{chat.chat_id}"
             )
         ])
+    
+    # ✅ Добавляем кнопки пагинации
+    nav_buttons = []
+    if page > 1:
+        nav_buttons.append(
+            InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin_chats_page_{user_id}_{page-1}")
+        )
+    if page < total_pages:
+        nav_buttons.append(
+            InlineKeyboardButton(text="➡️ Вперед", callback_data=f"admin_chats_page_{user_id}_{page+1}")
+        )
+    if nav_buttons:
+        keyboard_buttons.append(nav_buttons)
     
     keyboard_buttons.append([
         InlineKeyboardButton(
@@ -890,7 +1230,7 @@ async def admin_chat_open(callback: CallbackQuery):
     user_id = int(parts[3])
     chat_id = int(parts[4])
     
-    await show_chat_messages(callback.message, user_id, chat_id)
+    await show_chat_messages(callback.message, user_id, chat_id, None, 1)
     await callback.answer()
 
 
@@ -1036,7 +1376,7 @@ async def admin_chat_filter(callback: CallbackQuery):
     if filter_type == "all":
         filter_type = None
     
-    await show_chat_messages(callback.message, user_id, chat_id, filter_type)
+    await show_chat_messages(callback.message, user_id, chat_id, filter_type, 1)
     await callback.answer()
 
 
@@ -1175,8 +1515,28 @@ async def admin_chat_more(callback: CallbackQuery):
     await callback.answer()
 
 
-async def show_chat_messages(target, user_id: int, chat_id: int, filter_type: str = None):
-    """Показывает сообщения в конкретном чате с возможностью просмотра медиа"""
+@router.callback_query(lambda c: c.data.startswith("admin_chat_page_"))
+async def admin_chat_page(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    parts = callback.data.split("_")
+    user_id = int(parts[3])
+    chat_id = int(parts[4])
+    page = int(parts[5])
+    filter_type = parts[6] if len(parts) > 6 else "all"
+    
+    if filter_type == "all":
+        filter_type = None
+    
+    await show_chat_messages(callback.message, user_id, chat_id, filter_type, page)
+    await callback.answer()
+
+
+async def show_chat_messages(target, user_id: int, chat_id: int, filter_type: str = None, page: int = 1):
+    """Показывает сообщения в конкретном чате с пагинацией"""
+    MESSAGES_PER_PAGE = 15
     
     async with async_session() as session:
         user = await session.scalar(select(User).where(User.telegram_id == user_id))
@@ -1205,14 +1565,21 @@ async def show_chat_messages(target, user_id: int, chat_id: int, filter_type: st
         elif filter_type == "media":
             stmt = stmt.where(SavedMessage.media_path.isnot(None))
         
-        total_count = await session.scalar(
-            select(func.count()).select_from(stmt.subquery())
-        )
+        total_count = await session.scalar(select(func.count()).select_from(stmt.subquery()))
+        total_pages = (total_count + MESSAGES_PER_PAGE - 1) // MESSAGES_PER_PAGE if total_count else 1
+        
+        offset = (page - 1) * MESSAGES_PER_PAGE
         
         messages = await session.scalars(
-            stmt.order_by(SavedMessage.saved_at.desc()).limit(30)
+            stmt.order_by(SavedMessage.saved_at.desc())
+            .offset(offset)
+            .limit(MESSAGES_PER_PAGE)
         )
         messages = list(messages)
+    
+    if not messages:
+        await target.answer("📭 Нет сообщений в этом чате")
+        return
     
     chat_title_display = chat_title or f"Чат {chat_id}"
     
@@ -1231,6 +1598,7 @@ async def show_chat_messages(target, user_id: int, chat_id: int, filter_type: st
 🆔 <code>{user.telegram_id}</code>
 💬 ID чата: <code>{chat_id}</code>
 📊 <b>Показано:</b> {len(messages)} из {total_count}
+📄 <b>Страница {page} из {total_pages}</b>
 
 ➖➖➖➖➖➖➖➖➖➖➖➖
 """
@@ -1278,11 +1646,8 @@ async def show_chat_messages(target, user_id: int, chat_id: int, filter_type: st
             chat_text += f"\n<i>{' '.join(status)}</i>"
         
         chat_text += "\n➖➖➖➖➖➖➖➖➖➖\n"
-        
-        if len(chat_text) > 3800:
-            await send_chat_part(target, chat_text, user_id, chat_id, filter_type, len(messages))
-            chat_text = header
     
+    # Отправляем медиа отдельно
     if media_items:
         await target.answer("🖼️ <b>Медиа в этом чате:</b>", parse_mode="HTML")
         for msg in media_items[:10]:
@@ -1310,6 +1675,23 @@ async def show_chat_messages(target, user_id: int, chat_id: int, filter_type: st
             except Exception as e:
                 logger.error(f"Ошибка отправки медиа {msg.id}: {e}")
     
+    # Кнопки навигации
+    nav_buttons = []
+    if page > 1:
+        nav_buttons.append(
+            InlineKeyboardButton(
+                text="⬅️ Назад",
+                callback_data=f"admin_chat_page_{user_id}_{chat_id}_{page-1}_{filter_type or 'all'}"
+            )
+        )
+    if page < total_pages:
+        nav_buttons.append(
+            InlineKeyboardButton(
+                text="➡️ Вперед",
+                callback_data=f"admin_chat_page_{user_id}_{chat_id}_{page+1}_{filter_type or 'all'}"
+            )
+        )
+    
     keyboard_buttons = [
         [
             InlineKeyboardButton(text="🔄 Обновить", callback_data=f"admin_chat_open_{user_id}_{chat_id}"),
@@ -1321,7 +1703,6 @@ async def show_chat_messages(target, user_id: int, chat_id: int, filter_type: st
         ],
         [
             InlineKeyboardButton(text="🖼️ Все медиа", callback_data=f"admin_chat_media_{user_id}_{chat_id}"),
-            InlineKeyboardButton(text="📥 Показать ещё", callback_data=f"admin_chat_more_{user_id}_{chat_id}_{30}")
         ],
         [
             InlineKeyboardButton(text="📝 Все", callback_data=f"admin_chat_filter_{user_id}_{chat_id}_all"),
@@ -1330,12 +1711,16 @@ async def show_chat_messages(target, user_id: int, chat_id: int, filter_type: st
         [
             InlineKeyboardButton(text="✏️ Правки", callback_data=f"admin_chat_filter_{user_id}_{chat_id}_edited"),
             InlineKeyboardButton(text="🖼️ Медиа", callback_data=f"admin_chat_filter_{user_id}_{chat_id}_media")
-        ],
-        [
-            InlineKeyboardButton(text="💬 Список чатов", callback_data=f"admin_chats_user_{user_id}"),
-            InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")
         ]
     ]
+    
+    if nav_buttons:
+        keyboard_buttons.append(nav_buttons)
+    
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="💬 Список чатов", callback_data=f"admin_chats_user_{user_id}"),
+        InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")
+    ])
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
     
@@ -1677,259 +2062,6 @@ async def admin_status(callback: CallbackQuery):
     
     await safe_edit_message(callback.message, text, keyboard)
     await callback.answer()
-
-
-# ✅ УПРАВЛЕНИЕ ПОДПИСКАМИ
-@router.callback_query(lambda c: c.data == "admin_subs")
-async def admin_subs_menu(callback: CallbackQuery):
-    """Меню управления подписками"""
-    if not await is_admin(callback.from_user.id):
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    text = """
-🔐 <b>Управление подписками</b>
-
-Выберите действие:
-
-👤 <b>Информация о подписке</b> — показать подписку пользователя
-➕ <b>Начислить дни</b> — добавить дни любому пользователю
-➖ <b>Снять дни</b> — убрать дни у пользователя
-👥 <b>Список рефералов</b> — кого привел пользователь
-📊 <b>Статистика подписок</b> — общая статистика
-"""
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="👤 Информация", callback_data="admin_sub_info"),
-            InlineKeyboardButton(text="➕ Начислить дни", callback_data="admin_sub_add")
-        ],
-        [
-            InlineKeyboardButton(text="➖ Снять дни", callback_data="admin_sub_remove"),
-            InlineKeyboardButton(text="👥 Рефералы", callback_data="admin_sub_refs")
-        ],
-        [
-            InlineKeyboardButton(text="📊 Статистика", callback_data="admin_sub_stats")
-        ],
-        [
-            InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")
-        ]
-    ])
-    
-    await safe_edit_message(callback.message, text, keyboard)
-
-
-# ✅ ИНФОРМАЦИЯ О ПОДПИСКЕ
-@router.callback_query(lambda c: c.data == "admin_sub_info")
-async def admin_sub_info(callback: CallbackQuery, state: FSMContext):
-    if not await is_admin(callback.from_user.id):
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    await safe_edit_message(
-        callback.message,
-        "👤 <b>Информация о подписке</b>\n\n"
-        "Отправь ID пользователя.\n\n"
-        "Отправь /cancel чтобы отменить.",
-        parse_mode="HTML"
-    )
-    await state.set_state(AdminStates.waiting_for_user_id)
-    await state.update_data(action="sub_info")
-    await callback.answer()
-
-
-# ✅ НАЧИСЛИТЬ ДНИ
-@router.callback_query(lambda c: c.data == "admin_sub_add")
-async def admin_sub_add(callback: CallbackQuery, state: FSMContext):
-    if not await is_admin(callback.from_user.id):
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    await safe_edit_message(
-        callback.message,
-        "➕ <b>Начислить дни</b>\n\n"
-        "Отправь ID пользователя и количество дней через пробел.\n"
-        "Пример: <code>123456789 5</code>\n\n"
-        "Отправь /cancel чтобы отменить.",
-        parse_mode="HTML"
-    )
-    await state.set_state(AdminStates.waiting_for_user_id)
-    await state.update_data(action="sub_add")
-    await callback.answer()
-
-
-# ✅ СНЯТЬ ДНИ
-@router.callback_query(lambda c: c.data == "admin_sub_remove")
-async def admin_sub_remove(callback: CallbackQuery, state: FSMContext):
-    if not await is_admin(callback.from_user.id):
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    await safe_edit_message(
-        callback.message,
-        "➖ <b>Снять дни</b>\n\n"
-        "Отправь ID пользователя и количество дней через пробел.\n"
-        "Пример: <code>123456789 3</code>\n\n"
-        "Отправь /cancel чтобы отменить.",
-        parse_mode="HTML"
-    )
-    await state.set_state(AdminStates.waiting_for_user_id)
-    await state.update_data(action="sub_remove")
-    await callback.answer()
-
-
-# ✅ СПИСОК РЕФЕРАЛОВ
-@router.callback_query(lambda c: c.data == "admin_sub_refs")
-async def admin_sub_refs(callback: CallbackQuery, state: FSMContext):
-    if not await is_admin(callback.from_user.id):
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    await safe_edit_message(
-        callback.message,
-        "👥 <b>Список рефералов</b>\n\n"
-        "Отправь ID пользователя, чтобы увидеть кого он привел.\n\n"
-        "Отправь /cancel чтобы отменить.",
-        parse_mode="HTML"
-    )
-    await state.set_state(AdminStates.waiting_for_user_id)
-    await state.update_data(action="sub_refs")
-    await callback.answer()
-
-
-# ✅ СТАТИСТИКА ПОДПИСОК
-@router.callback_query(lambda c: c.data == "admin_sub_stats")
-async def admin_sub_stats(callback: CallbackQuery):
-    if not await is_admin(callback.from_user.id):
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    async with async_session() as session:
-        total_subs = await session.scalar(select(func.count()).select_from(Subscription))
-        active_subs = await session.scalar(
-            select(func.count()).select_from(Subscription).where(
-                Subscription.is_active == True,
-                Subscription.expires_at > datetime.utcnow()
-            )
-        )
-        trial_subs = await session.scalar(
-            select(func.count()).select_from(Subscription).where(Subscription.subscription_type == "trial")
-        )
-        premium_subs = await session.scalar(
-            select(func.count()).select_from(Subscription).where(Subscription.subscription_type == "premium")
-        )
-        total_refs = await session.scalar(select(func.count()).select_from(Referral))
-    
-    text = f"""
-📊 <b>Статистика подписок</b>
-
-━━━━━━━━━━━━━━━━━━━━━
-📝 <b>Всего подписок:</b> {total_subs or 0}
-✅ <b>Активных:</b> {active_subs or 0}
-🎁 <b>Пробных:</b> {trial_subs or 0}
-💎 <b>Премиум:</b> {premium_subs or 0}
-👥 <b>Всего рефералов:</b> {total_refs or 0}
-━━━━━━━━━━━━━━━━━━━━━
-"""
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_subs")]
-    ])
-    
-    await safe_edit_message(callback.message, text, keyboard)
-    await callback.answer()
-
-
-# ✅ ОБРАБОТЧИК ВВОДА ДЛЯ УПРАВЛЕНИЯ ПОДПИСКАМИ
-@router.message(AdminStates.waiting_for_user_id)
-async def process_sub_management(message: Message, state: FSMContext):
-    if not await is_admin(message.from_user.id):
-        await message.answer("⛔ Доступ запрещен")
-        await state.clear()
-        return
-    
-    data = await state.get_data()
-    action = data.get('action')
-    text = message.text.strip()
-    parts = text.split()
-    
-    try:
-        user_id = int(parts[0])
-        
-        if action == "sub_info":
-            subscription = await SubscriptionRepository.get_or_create_subscription(user_id)
-            days_left = (subscription.expires_at - datetime.utcnow()).days if subscription.expires_at else 0
-            
-            async with async_session() as session:
-                refs = await session.scalars(
-                    select(Referral).where(Referral.referrer_id == user_id)
-                )
-                refs = list(refs)
-            
-            text = f"""
-👤 <b>Информация о подписке</b>
-
-🆔 Пользователь: <code>{user_id}</code>
-📅 Статус: {'✅ Активна' if subscription.is_active and days_left > 0 else '❌ Неактивна'}
-📆 Действует до: {subscription.expires_at.strftime('%d.%m.%Y %H:%M') if subscription.expires_at else 'Неизвестно'}
-📝 Тип: {subscription.subscription_type}
-📊 Осталось дней: {days_left if days_left > 0 else 0}
-👥 Привел друзей: {len(refs)}
-"""
-            
-            await message.answer(text, parse_mode="HTML")
-            
-        elif action == "sub_add":
-            if len(parts) < 2:
-                await message.answer("❌ Нужно указать количество дней. Пример: 123456789 5")
-                return
-            days = int(parts[1])
-            subscription = await SubscriptionRepository.extend_subscription(user_id, days, "admin_add")
-            await message.answer(f"✅ Пользователю {user_id} начислено {days} дней! Подписка активна до {subscription.expires_at.strftime('%d.%m.%Y %H:%M')}")
-            
-        elif action == "sub_remove":
-            if len(parts) < 2:
-                await message.answer("❌ Нужно указать количество дней. Пример: 123456789 3")
-                return
-            days = int(parts[1])
-            subscription = await SubscriptionRepository.get_or_create_subscription(user_id)
-            if subscription.expires_at:
-                new_expires = subscription.expires_at - timedelta(days=days)
-                if new_expires < datetime.utcnow():
-                    new_expires = datetime.utcnow()
-                subscription.expires_at = new_expires
-                async with async_session() as session:
-                    await session.merge(subscription)
-                    await session.commit()
-                await message.answer(f"✅ У пользователя {user_id} снято {days} дней! Подписка активна до {subscription.expires_at.strftime('%d.%m.%Y %H:%M')}")
-            else:
-                await message.answer("❌ У пользователя нет активной подписки")
-            
-        elif action == "sub_refs":
-            async with async_session() as session:
-                refs = await session.scalars(
-                    select(Referral).where(Referral.referrer_id == user_id)
-                )
-                refs = list(refs)
-            
-            if not refs:
-                await message.answer(f"👥 Пользователь {user_id} никого не привел.")
-                return
-            
-            text = f"👥 <b>Рефералы пользователя {user_id}</b>\n\n"
-            for ref in refs:
-                referred_user = await UserRepository.get_by_id(ref.referred_id)
-                name = referred_user.first_name or referred_user.username or "Пользователь" if referred_user else "Неизвестно"
-                text += f"• {ref.referred_id} | {name} | {ref.created_at.strftime('%d.%m.%Y')}\n"
-            
-            await message.answer(text, parse_mode="HTML")
-        
-    except ValueError:
-        await message.answer("❌ Неверный формат. Отправь ID пользователя.")
-    except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}")
-    
-    await state.clear()
 
 
 # ✅ НАЗАД
