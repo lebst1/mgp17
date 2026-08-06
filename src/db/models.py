@@ -37,8 +37,6 @@ class User(Base):
     reminders = relationship("Reminder", back_populates="user")
     business_connections = relationship("BusinessConnection", back_populates="user")
     subscription = relationship("Subscription", back_populates="user", uselist=False)
-    referrals_given = relationship("Referral", foreign_keys="Referral.referrer_id", back_populates="referrer")
-    referrals_received = relationship("Referral", foreign_keys="Referral.referred_id", back_populates="referred")
     
     def __repr__(self):
         return f"<User {self.telegram_id} ({self.username or self.first_name})>"
@@ -175,32 +173,9 @@ class Subscription(Base):
     )
 
 
-class Referral(Base):
-    """Модель рефералов"""
-    __tablename__ = "referrals"
-    
-    id = Column(Integer, primary_key=True)
-    referrer_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False, index=True)
-    referred_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False, unique=True, index=True)
-    
-    days_awarded = Column(Integer, default=5)
-    
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    referrer = relationship("User", foreign_keys=[referrer_id], back_populates="referrals_given")
-    referred = relationship("User", foreign_keys=[referred_id], back_populates="referrals_received")
-    
-    __table_args__ = (
-        Index('ix_referrals_referrer_id', 'referrer_id'),
-        Index('ix_referrals_referred_id', 'referred_id'),
-    )
-
-
 # Добавляем связи в User
 User.saved_messages = relationship("SavedMessage", back_populates="user")
 User.todos = relationship("Todo", back_populates="user")
 User.reminders = relationship("Reminder", back_populates="user")
 User.business_connections = relationship("BusinessConnection", back_populates="user")
 User.subscription = relationship("Subscription", back_populates="user", uselist=False)
-User.referrals_given = relationship("Referral", foreign_keys=[Referral.referrer_id], back_populates="referrer")
-User.referrals_received = relationship("Referral", foreign_keys=[Referral.referred_id], back_populates="referred")

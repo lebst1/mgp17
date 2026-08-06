@@ -13,7 +13,6 @@ router = Router()
 
 
 def trim_text(text: str, max_len: int = 4000) -> str:
-    """Обрезает текст до максимальной длины"""
     if len(text) > max_len:
         return text[:max_len] + "\n\n... (сообщение обрезано)"
     return text
@@ -40,19 +39,14 @@ async def subscribe_info(message: Message):
 
 <b>💰 Цена:</b> 99₽ / месяц
 
-<b>👥 Реферальная программа:</b>
-Приведи друга и получи +5 дней бесплатно!
-
-<b>📌 Команды:</b>
+📌 <b>Команды:</b>
 /subscribe — информация о подписке
-/referral — реферальная ссылка
 /buy — купить подписку
 """)
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="💳 Купить 99₽", callback_data="subscribe_buy"),
-            InlineKeyboardButton(text="👥 Рефералка", callback_data="subscribe_referral")
+            InlineKeyboardButton(text="💳 Купить 99₽", callback_data="subscribe_buy")
         ],
         [
             InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")
@@ -69,69 +63,16 @@ async def subscribe_buy(callback: CallbackQuery):
     
     text = trim_text(
         "💳 <b>Оплата подписки</b>\n\n"
-        "Скоро здесь появится возможность оплаты.\n"
-        "А пока ты можешь использовать реферальную систему!\n\n"
-        "👥 Приведи друга и получи +5 дней бесплатно."
+        "Скоро здесь появится возможность оплаты.\n\n"
+        "🔙 Нажми «Назад», чтобы вернуться."
     )
     
     await callback.message.edit_text(
         text,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="👥 Рефералка", callback_data="subscribe_referral")],
             [InlineKeyboardButton(text="🔙 Назад", callback_data="subscribe_back")]
         ]),
         parse_mode="HTML"
-    )
-
-
-@router.callback_query(lambda c: c.data == "subscribe_referral")
-async def subscribe_referral(callback: CallbackQuery):
-    """Реферальная система"""
-    await callback.answer()
-    
-    user_id = callback.from_user.id
-    bot_username = settings.BOT_USERNAME or "laosllebot"
-    ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
-    
-    subscription = await SubscriptionRepository.get_or_create_subscription(user_id)
-    days_left = (subscription.expires_at - datetime.utcnow()).days if subscription.expires_at else 0
-    
-    text = trim_text(f"""
-👥 <b>Реферальная программа</b>
-
-За каждого приведенного друга ты получаешь <b>+5 дней</b> бесплатной подписки!
-
-<b>Твоя реферальная ссылка:</b>
-<code>{ref_link}</code>
-
-📋 <b>Как это работает:</b>
-1. Отправь ссылку другу
-2. Друг переходит по ссылке и запускает бота
-3. Ты получаешь +5 дней к подписке
-4. Друг получает 1 день бесплатно
-
-<b>Твой баланс:</b>
-📊 Осталось дней: {days_left if days_left > 0 else '0'}
-""")
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Скопировать ссылку", callback_data="copy_referral")],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="subscribe_back")]
-    ])
-    
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-
-
-@router.callback_query(lambda c: c.data == "copy_referral")
-async def copy_referral(callback: CallbackQuery):
-    """Копирование реферальной ссылки"""
-    user_id = callback.from_user.id
-    bot_username = settings.BOT_USERNAME or "laosllebot"
-    ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
-    
-    await callback.answer(
-        text=f"📋 Ссылка скопирована!\n\n{ref_link}",
-        show_alert=True
     )
 
 
@@ -140,41 +81,6 @@ async def subscribe_back(callback: CallbackQuery):
     """Назад к подписке"""
     await callback.answer()
     await subscribe_info(callback.message)
-
-
-@router.message(Command("referral"))
-async def referral_command(message: Message):
-    """Реферальная ссылка"""
-    await SubscriptionRepository.get_or_create_subscription(message.from_user.id)
-    
-    user_id = message.from_user.id
-    bot_username = settings.BOT_USERNAME or "laosllebot"
-    ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
-    
-    subscription = await SubscriptionRepository.get_or_create_subscription(user_id)
-    days_left = (subscription.expires_at - datetime.utcnow()).days if subscription.expires_at else 0
-    
-    text = trim_text(f"""
-👥 <b>Твоя реферальная ссылка</b>
-
-<code>{ref_link}</code>
-
-📋 <b>Как это работает:</b>
-1. Отправь ссылку другу
-2. Друг переходит по ссылке и запускает бота
-3. Ты получаешь +5 дней к подписке
-4. Друг получает 1 день бесплатно
-
-<b>Твой баланс:</b>
-📊 Осталось дней: {days_left if days_left > 0 else '0'}
-""")
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Скопировать ссылку", callback_data="copy_referral")],
-        [InlineKeyboardButton(text="💳 Подписка", callback_data="subscribe_back")]
-    ])
-    
-    await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 
 @router.message(Command("buy"))

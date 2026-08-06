@@ -163,17 +163,6 @@ async def send_main_menu(target, user, has_business):
 
 @router.message(Command("start"))
 async def start_command(message: Message):
-    # ✅ ПРОВЕРЯЕМ РЕФЕРАЛЬНУЮ ССЫЛКУ
-    args = message.text.split()
-    referrer_id = None
-    
-    if len(args) > 1 and args[1].startswith("ref_"):
-        try:
-            referrer_id = int(args[1].replace("ref_", ""))
-        except ValueError:
-            pass
-    
-    # Создаем пользователя
     user = await UserRepository.get_or_create(
         telegram_id=message.from_user.id,
         username=message.from_user.username,
@@ -181,57 +170,6 @@ async def start_command(message: Message):
         last_name=message.from_user.last_name
     )
     
-    # ✅ Если есть реферер — активируем рефералку
-    if referrer_id and referrer_id != message.from_user.id:
-        success = await SubscriptionRepository.activate_referral(
-            referrer_id=referrer_id,
-            referred_id=message.from_user.id
-        )
-        if success:
-            # ✅ ДАЁМ +1 ДЕНЬ ПРИГЛАШЕННОМУ ПОЛЬЗОВАТЕЛЮ
-            await SubscriptionRepository.extend_subscription(
-                user_id=message.from_user.id,
-                days=1,
-                reason="referred"
-            )
-            
-            # ✅ Получаем обновленную подписку для нового пользователя
-            subscription = await SubscriptionRepository.get_or_create_subscription(message.from_user.id)
-            days_left = (subscription.expires_at - datetime.utcnow()).days if subscription.expires_at else 0
-            
-            await message.answer(
-                f"🎉 <b>Реферал активирован!</b>\n\n"
-                f"Ты получил <b>+1 день</b> бесплатной подписки!\n"
-                f"Твой друг тоже получил +3 дня!\n\n"
-                f"📊 <b>Твой баланс:</b> {days_left} дней",
-                parse_mode="HTML"
-            )
-            
-            # ✅ УВЕДОМЛЕНИЕ РЕФЕРЕРУ
-            try:
-                from aiogram import Bot
-                bot = Bot(token=settings.BOT_TOKEN)
-                
-                referrer_user = await UserRepository.get_by_id(referrer_id)
-                referrer_name = referrer_user.first_name or referrer_user.username or "Пользователь" if referrer_user else "Пользователь"
-                
-                referrer_sub = await SubscriptionRepository.get_or_create_subscription(referrer_id)
-                referrer_days = (referrer_sub.expires_at - datetime.utcnow()).days if referrer_sub.expires_at else 0
-                
-                await bot.send_message(
-                    chat_id=referrer_id,
-                    text=f"🎉 <b>По вашей реферальной ссылке перешел новый пользователь!</b>\n\n"
-                         f"👤 <b>{message.from_user.first_name or 'Пользователь'}</b>\n"
-                         f"📛 @{message.from_user.username or 'Нет юзернейма'}\n\n"
-                         f"✅ Вы получили <b>+3 дня</b> бесплатной подписки!\n"
-                         f"📊 Теперь у вас <b>{referrer_days} дней</b>",
-                    parse_mode="HTML"
-                )
-                await bot.session.close()
-            except Exception as e:
-                logger.error(f"Ошибка отправки уведомления рефереру: {e}")
-    
-    # ✅ СОЗДАЕМ ПОДПИСКУ (если её нет)
     subscription = await SubscriptionRepository.get_or_create_subscription(message.from_user.id)
     
     connections = await BusinessRepository.get_user_connections(message.from_user.id)
@@ -267,7 +205,6 @@ async def show_help(callback: CallbackQuery):
 /savemode on — Включить SAVE MODE
 /savemode off — Выключить SAVE MODE
 /subscribe — Информация о подписке
-/referral — Реферальная ссылка
 """
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")]
@@ -389,7 +326,6 @@ async def savemode_off(callback: CallbackQuery):
     await callback.answer("❌ SAVE MODE выключен! Используй /savemode off")
 
 
-# ✅ ПОДПИСКА (НОВЫЙ ОБРАБОТЧИК)
 @router.callback_query(lambda c: c.data == "subscribe_info")
 async def subscribe_info_callback(callback: CallbackQuery):
     await callback.answer()
@@ -397,15 +333,6 @@ async def subscribe_info_callback(callback: CallbackQuery):
     await subscribe_info(callback.message)
 
 
-# ✅ РЕФЕРАЛКА (НОВЫЙ ОБРАБОТЧИК)
-@router.callback_query(lambda c: c.data == "subscribe_referral")
-async def subscribe_referral_callback(callback: CallbackQuery):
-    await callback.answer()
-    from .subscription import subscribe_referral
-    await subscribe_referral(callback)
-
-
-# ✅ КУПИТЬ (НОВЫЙ ОБРАБОТЧИК)
 @router.callback_query(lambda c: c.data == "subscribe_buy")
 async def subscribe_buy_callback(callback: CallbackQuery):
     await callback.answer()
@@ -413,20 +340,11 @@ async def subscribe_buy_callback(callback: CallbackQuery):
     await subscribe_buy(callback)
 
 
-# ✅ НАЗАД К ПОДПИСКЕ (НОВЫЙ ОБРАБОТЧИК)
 @router.callback_query(lambda c: c.data == "subscribe_back")
 async def subscribe_back_callback(callback: CallbackQuery):
     await callback.answer()
     from .subscription import subscribe_back
     await subscribe_back(callback)
-
-
-# ✅ КОПИРОВАТЬ ССЫЛКУ (НОВЫЙ ОБРАБОТЧИК)
-@router.callback_query(lambda c: c.data == "copy_referral")
-async def copy_referral_callback(callback: CallbackQuery):
-    await callback.answer()
-    from .subscription import copy_referral
-    await copy_referral(callback)
 
 
 @router.message(Command("help"))

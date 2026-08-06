@@ -38,7 +38,6 @@ class AuthMiddleware(BaseMiddleware):
             await event.answer("⛔ У вас нет доступа к этому боту.")
             return
         
-        # ✅ ПРОВЕРКА ПОДПИСКИ
         subscription = await SubscriptionRepository.get_active_subscription(user_id)
         if not subscription:
             subscription = await SubscriptionRepository.get_or_create_subscription(user_id)
@@ -50,20 +49,13 @@ class AuthMiddleware(BaseMiddleware):
                             text="💳 Купить подписку 99₽",
                             callback_data="subscribe_buy"
                         )
-                    ],
-                    [
-                        InlineKeyboardButton(
-                            text="👥 Привести друга (+5 дней)",
-                            callback_data="subscribe_referral"
-                        )
                     ]
                 ])
                 
                 text = trim_text(
                     "⏰ <b>Ваша подписка истекла!</b>\n\n"
                     "Чтобы продолжить пользоваться ботом:\n"
-                    "• Купи подписку за 99₽/месяц\n"
-                    "• Приведи друга и получи +5 дней бесплатно\n\n"
+                    "• Купи подписку за 99₽/месяц\n\n"
                     "У тебя уже был пробный день."
                 )
                 
@@ -75,8 +67,7 @@ class AuthMiddleware(BaseMiddleware):
                     "Ты получил <b>1 день бесплатного</b> использования!\n"
                     "Наслаждайся всеми функциями бота.\n\n"
                     "После окончания пробного периода ты сможешь:\n"
-                    "• Купить подписку за 99₽/месяц\n"
-                    "• Привести друга и получить +5 дней бесплатно"
+                    "• Купить подписку за 99₽/месяц"
                 )
                 
                 await event.answer(text, parse_mode="HTML")

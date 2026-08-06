@@ -1,7 +1,7 @@
 from sqlalchemy import select, and_
 from typing import Optional
 from datetime import datetime, timedelta
-from src.db.models import Subscription, Referral
+from src.db.models import Subscription
 from src.db.session import async_session
 import logging
 
@@ -12,6 +12,7 @@ class SubscriptionRepository:
 
     @staticmethod
     async def get_or_create_subscription(user_id: int) -> Subscription:
+        """Получить подписку или создать, если её нет"""
         async with async_session() as session:
             result = await session.execute(
                 select(Subscription).where(Subscription.user_id == user_id)
@@ -35,6 +36,7 @@ class SubscriptionRepository:
 
     @staticmethod
     async def get_active_subscription(user_id: int) -> Optional[Subscription]:
+        """Получить активную подписку"""
         async with async_session() as session:
             result = await session.execute(
                 select(Subscription).where(
@@ -46,7 +48,8 @@ class SubscriptionRepository:
             return result.scalar_one_or_none()
 
     @staticmethod
-    async def extend_subscription(user_id: int, days: int, reason: str = "referral") -> Optional[Subscription]:
+    async def extend_subscription(user_id: int, days: int, reason: str = "admin") -> Optional[Subscription]:
+        """Продлить подписку на N дней"""
         async with async_session() as session:
             subscription = await session.scalar(
                 select(Subscription).where(Subscription.user_id == user_id)
@@ -71,28 +74,3 @@ class SubscriptionRepository:
             await session.refresh(subscription)
             logger.info(f"✅ Подписка {user_id} продлена на {days} дней ({reason})")
             return subscription
-
-    @staticmethod
-    async def activate_referral(referrer_id: int, referred_id: int) -> bool:
-        async with async_session() as session:
-            if referrer_id == referred_id:
-                return False
-            existing = await session.scalar(
-                select(Referral).where(Referral.referred_id == referred_id)
-            )
-            if existing:
-                return False
-            referral = Referral(
-                referrer_id=referrer_id,
-                referred_id=referred_id,
-                days_awarded=3
-            )
-            session.add(referral)
-            await SubscriptionRepository.extend_subscription(
-                user_id=referrer_id,
-                days=3,
-                reason="referral"
-            )
-            await session.commit()
-            logger.info(f"✅ Реферал {referred_id} приглашен {referrer_id}")
-            return True
