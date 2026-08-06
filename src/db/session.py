@@ -64,14 +64,22 @@ async def init_db():
                 
                 if "users" in inspector.get_table_names():
                     columns = [col["name"] for col in inspector.get_columns("users")]
-                    
-                    if "messages_saved" not in columns:
-                        sync_conn.execute(text("ALTER TABLE users ADD COLUMN messages_saved INTEGER DEFAULT 0"))
-                        logger.info("✅ Добавлена колонка messages_saved")
-                    
-                    if "ai_requests" not in columns:
-                        sync_conn.execute(text("ALTER TABLE users ADD COLUMN ai_requests INTEGER DEFAULT 0"))
-                        logger.info("✅ Добавлена колонка ai_requests")
+
+                    user_columns = {
+                        "messages_saved": "INTEGER DEFAULT 0",
+                        "ai_requests": "INTEGER DEFAULT 0",
+                        "subscription_until": "DATETIME",
+                        "referral_code": "VARCHAR(64)",
+                        "referred_by": "BIGINT",
+                        "referrals_count": "INTEGER DEFAULT 0",
+                        "referral_days_earned": "INTEGER DEFAULT 0",
+                        "referral_reward_claimed": "BOOLEAN DEFAULT 0",
+                    }
+
+                    for col_name, col_type in user_columns.items():
+                        if col_name not in columns:
+                            sync_conn.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}"))
+                            logger.info(f"✅ Добавлена колонка users.{col_name}")
                 
                 if "saved_messages" in inspector.get_table_names():
                     columns = [col["name"] for col in inspector.get_columns("saved_messages")]

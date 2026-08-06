@@ -34,7 +34,7 @@ class AuthMiddleware(BaseMiddleware):
             return
         
         try:
-            user = await UserRepository.get_or_create(
+            user, _ = await UserRepository.get_or_create(
                 telegram_id=user_id,
                 username=event.from_user.username,
                 first_name=event.from_user.first_name,

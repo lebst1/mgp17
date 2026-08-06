@@ -1,76 +1,38 @@
-from sqlalchemy import select, and_
-from typing import Optional
 from datetime import datetime, timedelta
-from src.db.models import Subscription
-from src.db.session import async_session
+from typing import Optional
 import logging
+import uuid
+
+from src.config import settings
+from src.db.models import User
+from src.db.repositories.user_repository import UserRepository
 
 logger = logging.getLogger(__name__)
 
 
 class SubscriptionRepository:
+    """Обёртка над полями подписки в модели User."""
 
     @staticmethod
-    async def get_or_create_subscription(user_id: int) -> Subscription:
-        """Получить подписку или создать, если её нет"""
-        async with async_session() as session:
-            result = await session.execute(
-                select(Subscription).where(Subscription.user_id == user_id)
-            )
-            subscription = result.scalar_one_or_none()
-            if subscription:
-                return subscription
-            new_sub = Subscription(
-                user_id=user_id,
-                subscription_type="trial",
-                starts_at=datetime.utcnow(),
-                expires_at=datetime.utcnow() + timedelta(days=1),
-                trial_used=False,
-                is_active=True
-            )
-            session.add(new_sub)
-            await session.commit()
-            await session.refresh(new_sub)
-            logger.info(f"✅ Создана пробная подписка для {user_id}")
-            return new_sub
+    async def get_or_create_subscription(user_id: int) -> User:
+        user, _ = await UserRepository.get_or_create(user_id)
+        return user
 
     @staticmethod
-    async def get_active_subscription(user_id: int) -> Optional[Subscription]:
-        """Получить активную подписку"""
-        async with async_session() as session:
-            result = await session.execute(
-                select(Subscription).where(
-                    Subscription.user_id == user_id,
-                    Subscription.is_active == True,
-                    Subscription.expires_at > datetime.utcnow()
-                )
-            )
-            return result.scalar_one_or_none()
+    async def get_active_subscription(user_id: int) -> Optional[User]:
+        user = await UserRepository.get_by_id(user_id)
+        if user and user.has_active_subscription():
+            return user
+        return None
 
     @staticmethod
-    async def extend_subscription(user_id: int, days: int, reason: str = "admin") -> Optional[Subscription]:
-        """Продлить подписку на N дней"""
-        async with async_session() as session:
-            subscription = await session.scalar(
-                select(Subscription).where(Subscription.user_id == user_id)
-            )
-            if not subscription:
-                subscription = Subscription(
-                    user_id=user_id,
-                    subscription_type=reason,
-                    starts_at=datetime.utcnow(),
-                    expires_at=datetime.utcnow() + timedelta(days=days),
-                    is_active=True
-                )
-                session.add(subscription)
-            else:
-                if subscription.expires_at < datetime.utcnow():
-                    subscription.expires_at = datetime.utcnow() + timedelta(days=days)
-                else:
-                    subscription.expires_at = subscription.expires_at + timedelta(days=days)
-                subscription.is_active = True
-                subscription.subscription_type = reason
-            await session.commit()
-            await session.refresh(subscription)
-            logger.info(f"✅ Подписка {user_id} продлена на {days} дней ({reason})")
-            return subscription
+    async def extend_subscription(user_id: int, days: int, reason: str = "admin") -> Optional[User]:
+        user = await UserRepository.extend_subscription(user_id, days)
+        if user:
+            logger.info(f"✅ Подписка {user_id} +{days} дн. ({reason})")
+        return user
+
+    @staticmethod
+    def get_days_left(user: User) -> int:
+        info = user.get_subscription_info()
+        return info["days_left"]

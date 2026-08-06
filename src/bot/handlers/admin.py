@@ -8,10 +8,11 @@ from aiogram.fsm.state import State, StatesGroup
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.message_repository import MessageRepository
 from src.db.repositories.business_repository import BusinessRepository
+from src.db.repositories.payment_repository import PaymentRepository
 from src.db.session import async_session, cleanup_old_data
 from src.config import settings
 from sqlalchemy import select, func, or_, and_, desc, case
-from src.db.models import User, SavedMessage, BusinessConnection
+from src.db.models import User, SavedMessage, BusinessConnection, Payment
 import os
 import logging
 from datetime import datetime, timedelta
@@ -56,14 +57,13 @@ class AdminStates(StatesGroup):
     waiting_for_sub_info = State()
     waiting_for_sub_add = State()
     waiting_for_sub_remove = State()
+    waiting_for_sub_grant_user = State()
+    waiting_for_sub_revoke_user = State()
 
 
-# ✅ ПРОВЕРКА АДМИНА
+# ✅ ПРОВЕРКА АДМИНА (только владелец)
 async def is_admin(user_id: int) -> bool:
-    if user_id == settings.OWNER_TELEGRAM_ID:
-        return True
-    user = await UserRepository.get_by_id(user_id)
-    return user.is_admin if user else False
+    return user_id == settings.OWNER_TELEGRAM_ID
 
 
 # ✅ БЕЗОПАСНОЕ РЕДАКТИРОВАНИЕ СООБЩЕНИЯ
@@ -94,6 +94,12 @@ async def show_admin_panel(target):
 🗑️ <b>Очистка БД</b> — удалить старые данные
 💾 <b>Бэкап</b> — создать бэкап
 💚 <b>Статус</b> — состояние бота
+
+➕ <b>Выдать подписку</b> — продлить доступ
+➖ <b>Забрать подписку</b> — отозвать доступ
+📋 <b>Подписки</b> — список подписок
+🎁 <b>Рефералы</b> — статистика рефералов
+💳 <b>Платежи</b> — история платежей
 """
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -115,6 +121,17 @@ async def show_admin_panel(target):
         ],
         [
             InlineKeyboardButton(text="💬 Чаты пользователя", callback_data="admin_chats")
+        ],
+        [
+            InlineKeyboardButton(text="➕ Выдать подписку", callback_data="admin_sub_grant"),
+            InlineKeyboardButton(text="➖ Забрать подписку", callback_data="admin_sub_revoke")
+        ],
+        [
+            InlineKeyboardButton(text="📋 Подписки", callback_data="admin_subscriptions"),
+            InlineKeyboardButton(text="🎁 Рефералы", callback_data="admin_referrals")
+        ],
+        [
+            InlineKeyboardButton(text="💳 Платежи", callback_data="admin_payments")
         ],
         [
             InlineKeyboardButton(text="🗑️ Очистка БД", callback_data="admin_cleanup"),
@@ -162,6 +179,9 @@ async def admin_stats(callback: CallbackQuery):
             select(func.count()).select_from(SavedMessage).where(SavedMessage.media_path.isnot(None))
         )
         connections_count = await session.scalar(select(func.count()).select_from(BusinessConnection))
+
+    sub_stats = await UserRepository.get_subscription_stats()
+    pay_stats = await PaymentRepository.get_stats()
     
     media_dir_size = 0
     media_files = 0
@@ -183,6 +203,18 @@ async def admin_stats(callback: CallbackQuery):
 🖼️ <b>Медиа в БД:</b> {media_count or 0}
 💾 <b>Медиа на диске:</b> {media_files} ({media_dir_size / 1024 / 1024:.1f} МБ)
 🔗 <b>Бизнес-подключений:</b> {connections_count or 0}
+━━━━━━━━━━━━━━━━━━━━━
+
+<b>Подписки:</b>
+👤 Всего пользователей: {sub_stats['total_users']}
+✅ Активных подписок: {sub_stats['active_subscriptions']}
+❌ Истекших подписок: {sub_stats['expired_subscriptions']}
+🎁 Всего рефералов: {sub_stats['total_referrals']}
+
+<b>Платежи:</b>
+💳 Всего платежей: {pay_stats['total_payments']}
+✅ Успешных: {pay_stats['succeeded_payments']}
+💰 Сумма: {pay_stats['total_amount']:.0f}₽
 ━━━━━━━━━━━━━━━━━━━━━
 
 🔄 <i>Обновлено: {format_datetime(datetime.now())}</i>
@@ -1265,3 +1297,231 @@ async def admin_back(callback: CallbackQuery):
 async def cancel_cmd(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("❌ Действие отменено.")
+
+
+# ✅ ВЫДАТЬ ПОДПИСКУ
+@router.callback_query(lambda c: c.data == "admin_sub_grant")
+async def admin_sub_grant(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+
+    await safe_edit_message(
+        callback.message,
+        "➕ <b>Выдать подписку</b>\n\nОтправь Telegram ID пользователя:",
+        InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Отмена", callback_data="admin_back")]
+        ]),
+    )
+    await state.set_state(AdminStates.waiting_for_sub_grant_user)
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_for_sub_grant_user)
+async def admin_sub_grant_user(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        await message.answer("⛔ Доступ запрещен")
+        await state.clear()
+        return
+
+    try:
+        user_id = int(message.text.strip())
+    except ValueError:
+        await message.answer("❌ Отправь числовой Telegram ID.")
+        return
+
+    user = await UserRepository.get_by_id(user_id)
+    if not user:
+        await message.answer(f"❌ Пользователь {user_id} не найден.")
+        await state.clear()
+        return
+
+    await state.update_data(grant_user_id=user_id)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="1 день", callback_data="admin_grant_days_1"),
+            InlineKeyboardButton(text="7 дней", callback_data="admin_grant_days_7"),
+        ],
+        [
+            InlineKeyboardButton(text="30 дней", callback_data="admin_grant_days_30"),
+            InlineKeyboardButton(text="90 дней", callback_data="admin_grant_days_90"),
+        ],
+        [
+            InlineKeyboardButton(text="365 дней", callback_data="admin_grant_days_365"),
+        ],
+        [InlineKeyboardButton(text="🔙 Отмена", callback_data="admin_back")],
+    ])
+    await message.answer(
+        f"👤 Пользователь: <code>{user_id}</code>\n\nВыбери срок подписки:",
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(lambda c: c.data.startswith("admin_grant_days_"))
+async def admin_grant_days(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+
+    days = int(callback.data.split("_")[-1])
+    data = await state.get_data()
+    user_id = data.get("grant_user_id")
+    if not user_id:
+        await callback.answer("❌ ID не найден", show_alert=True)
+        return
+
+    user = await UserRepository.extend_subscription(user_id, days)
+    until = format_datetime(user.subscription_until) if user else "—"
+    await safe_edit_message(
+        callback.message,
+        f"✅ Подписка выдана!\n\n👤 ID: <code>{user_id}</code>\n📅 До: {until}\n➕ Дней: {days}",
+        InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
+        ]),
+    )
+    await state.clear()
+    await callback.answer()
+
+
+# ✅ ЗАБРАТЬ ПОДПИСКУ
+@router.callback_query(lambda c: c.data == "admin_sub_revoke")
+async def admin_sub_revoke(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+
+    await safe_edit_message(
+        callback.message,
+        "➖ <b>Забрать подписку</b>\n\nОтправь Telegram ID пользователя:",
+        InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Отмена", callback_data="admin_back")]
+        ]),
+    )
+    await state.set_state(AdminStates.waiting_for_sub_revoke_user)
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_for_sub_revoke_user)
+async def admin_sub_revoke_user(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        await message.answer("⛔ Доступ запрещен")
+        await state.clear()
+        return
+
+    try:
+        user_id = int(message.text.strip())
+    except ValueError:
+        await message.answer("❌ Отправь числовой Telegram ID.")
+        return
+
+    user = await UserRepository.revoke_subscription(user_id)
+    if user:
+        await message.answer(f"✅ Подписка пользователя <code>{user_id}</code> отозвана.", parse_mode="HTML")
+    else:
+        await message.answer(f"❌ Пользователь {user_id} не найден.")
+    await state.clear()
+
+
+# ✅ СПИСОК ПОДПИСОК
+@router.callback_query(lambda c: c.data == "admin_subscriptions")
+async def admin_subscriptions(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+
+    now = datetime.utcnow()
+    async with async_session() as session:
+        active = await session.scalars(
+            select(User).where(User.subscription_until > now).order_by(User.subscription_until.desc()).limit(15)
+        )
+        active = list(active)
+
+    text = "📋 <b>Активные подписки (15):</b>\n\n"
+    if not active:
+        text += "Нет активных подписок."
+    else:
+        for u in active:
+            until = format_datetime(u.subscription_until)
+            text += f"👤 <code>{u.telegram_id}</code> | до {until}\n"
+
+    await safe_edit_message(
+        callback.message,
+        text,
+        InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
+        ]),
+    )
+    await callback.answer()
+
+
+# ✅ РЕФЕРАЛЫ
+@router.callback_query(lambda c: c.data == "admin_referrals")
+async def admin_referrals(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+
+    stats = await UserRepository.get_subscription_stats()
+    async with async_session() as session:
+        top = await session.scalars(
+            select(User).where(User.referrals_count > 0).order_by(User.referrals_count.desc()).limit(10)
+        )
+        top = list(top)
+
+    text = f"""
+🎁 <b>Реферальная статистика</b>
+
+👥 Всего рефералов: {stats['total_referrals']}
+
+<b>Топ рефереров:</b>
+"""
+    if not top:
+        text += "Пока нет рефералов."
+    else:
+        for u in top:
+            text += f"👤 <code>{u.telegram_id}</code> — {u.referrals_count} реф., {u.referral_days_earned} дн.\n"
+
+    await safe_edit_message(
+        callback.message,
+        text,
+        InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
+        ]),
+    )
+    await callback.answer()
+
+
+# ✅ ПЛАТЕЖИ
+@router.callback_query(lambda c: c.data == "admin_payments")
+async def admin_payments(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+
+    pay_stats = await PaymentRepository.get_stats()
+    payments = await PaymentRepository.get_recent(15)
+
+    text = f"""
+💳 <b>Платежи</b>
+
+Всего: {pay_stats['total_payments']}
+Успешных: {pay_stats['succeeded_payments']}
+Сумма: {pay_stats['total_amount']:.0f}₽
+
+<b>Последние:</b>
+"""
+    if not payments:
+        text += "Платежей пока нет."
+    else:
+        for p in payments:
+            text += f"• <code>{p.payment_id[:12]}...</code> | {p.user_id} | {p.amount}₽ | {p.status}\n"
+
+    await safe_edit_message(
+        callback.message,
+        text,
+        InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
+        ]),
+    )
+    await callback.answer()

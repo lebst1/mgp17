@@ -125,7 +125,7 @@ async def handle_business_connection(event: BusinessConnection, bot: Bot):
     logger.info(f"👤 Пользователь: {user_id}")
     logger.info(f"📊 Статус: {event.is_enabled}")
     
-    user = await UserRepository.get_or_create(
+    user, _ = await UserRepository.get_or_create(
         telegram_id=user_id,
         username=event.user.username,
         first_name=event.user.first_name,
@@ -377,7 +377,7 @@ async def handle_business_edited(message: Message):
 async def business_status(message: Message):
     user = await UserRepository.get_by_id(message.from_user.id)
     if not user:
-        user = await UserRepository.get_or_create(
+        user, _ = await UserRepository.get_or_create(
             telegram_id=message.from_user.id,
             username=message.from_user.username,
             first_name=message.from_user.first_name,
