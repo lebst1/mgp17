@@ -30,7 +30,7 @@ async def subscribe_info(message: Message):
     if subscription.expires_at:
         days_left = (subscription.expires_at - datetime.utcnow()).days
     
-    text = f"""
+    text = trim_text(f"""
 💳 <b>Подписка SafeSaverX</b>
 
 📅 <b>Статус:</b> {'✅ Активна' if subscription.is_active and days_left > 0 else '❌ Неактивна'}
@@ -47,9 +47,7 @@ async def subscribe_info(message: Message):
 /subscribe — информация о подписке
 /referral — реферальная ссылка
 /buy — купить подписку
-"""
-    
-    text = trim_text(text)
+""")
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -69,14 +67,12 @@ async def subscribe_buy(callback: CallbackQuery):
     """Оплата подписки"""
     await callback.answer()
     
-    text = (
+    text = trim_text(
         "💳 <b>Оплата подписки</b>\n\n"
         "Скоро здесь появится возможность оплаты.\n"
         "А пока ты можешь использовать реферальную систему!\n\n"
         "👥 Приведи друга и получи +5 дней бесплатно."
     )
-    
-    text = trim_text(text)
     
     await callback.message.edit_text(
         text,
@@ -100,7 +96,7 @@ async def subscribe_referral(callback: CallbackQuery):
     subscription = await SubscriptionRepository.get_or_create_subscription(user_id)
     days_left = (subscription.expires_at - datetime.utcnow()).days if subscription.expires_at else 0
     
-    text = f"""
+    text = trim_text(f"""
 👥 <b>Реферальная программа</b>
 
 За каждого приведенного друга ты получаешь <b>+5 дней</b> бесплатной подписки!
@@ -116,9 +112,7 @@ async def subscribe_referral(callback: CallbackQuery):
 
 <b>Твой баланс:</b>
 📊 Осталось дней: {days_left if days_left > 0 else '0'}
-"""
-    
-    text = trim_text(text)
+""")
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📋 Скопировать ссылку", callback_data="copy_referral")],
@@ -160,7 +154,7 @@ async def referral_command(message: Message):
     subscription = await SubscriptionRepository.get_or_create_subscription(user_id)
     days_left = (subscription.expires_at - datetime.utcnow()).days if subscription.expires_at else 0
     
-    text = f"""
+    text = trim_text(f"""
 👥 <b>Твоя реферальная ссылка</b>
 
 <code>{ref_link}</code>
@@ -173,9 +167,7 @@ async def referral_command(message: Message):
 
 <b>Твой баланс:</b>
 📊 Осталось дней: {days_left if days_left > 0 else '0'}
-"""
-    
-    text = trim_text(text)
+""")
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📋 Скопировать ссылку", callback_data="copy_referral")],

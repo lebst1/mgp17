@@ -9,6 +9,13 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def trim_text(text: str, max_len: int = 4000) -> str:
+    """Обрезает текст до максимальной длины"""
+    if len(text) > max_len:
+        return text[:max_len] + "\n\n... (сообщение обрезано)"
+    return text
+
+
 class AuthMiddleware(BaseMiddleware):
     """Middleware для проверки авторизации и подписки"""
     
@@ -52,7 +59,7 @@ class AuthMiddleware(BaseMiddleware):
                     ]
                 ])
                 
-                text = (
+                text = trim_text(
                     "⏰ <b>Ваша подписка истекла!</b>\n\n"
                     "Чтобы продолжить пользоваться ботом:\n"
                     "• Купи подписку за 99₽/месяц\n"
@@ -60,14 +67,10 @@ class AuthMiddleware(BaseMiddleware):
                     "У тебя уже был пробный день."
                 )
                 
-                # ✅ ОБРЕЗАЕМ ДЛИННОЕ СООБЩЕНИЕ
-                if len(text) > 4000:
-                    text = text[:4000] + "\n\n... (сообщение обрезано)"
-                
                 await event.answer(text, reply_markup=keyboard, parse_mode="HTML")
                 return
             else:
-                text = (
+                text = trim_text(
                     "🎁 <b>Добро пожаловать!</b>\n\n"
                     "Ты получил <b>1 день бесплатного</b> использования!\n"
                     "Наслаждайся всеми функциями бота.\n\n"
@@ -75,10 +78,6 @@ class AuthMiddleware(BaseMiddleware):
                     "• Купить подписку за 99₽/месяц\n"
                     "• Привести друга и получить +5 дней бесплатно"
                 )
-                
-                # ✅ ОБРЕЗАЕМ ДЛИННОЕ СООБЩЕНИЕ
-                if len(text) > 4000:
-                    text = text[:4000] + "\n\n... (сообщение обрезано)"
                 
                 await event.answer(text, parse_mode="HTML")
         
