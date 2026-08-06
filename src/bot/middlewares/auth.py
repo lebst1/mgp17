@@ -31,6 +31,7 @@ class AuthMiddleware(BaseMiddleware):
             await event.answer("⛔ У вас нет доступа к этому боту.")
             return
         
+        # ✅ ПРОВЕРКА ПОДПИСКИ
         subscription = await SubscriptionRepository.get_active_subscription(user_id)
         if not subscription:
             subscription = await SubscriptionRepository.get_or_create_subscription(user_id)
@@ -59,7 +60,7 @@ class AuthMiddleware(BaseMiddleware):
                     "У тебя уже был пробный день."
                 )
                 
-                # ✅ Проверка длины сообщения
+                # ✅ ОБРЕЗАЕМ ДЛИННОЕ СООБЩЕНИЕ
                 if len(text) > 4000:
                     text = text[:4000] + "\n\n... (сообщение обрезано)"
                 
@@ -75,6 +76,7 @@ class AuthMiddleware(BaseMiddleware):
                     "• Привести друга и получить +5 дней бесплатно"
                 )
                 
+                # ✅ ОБРЕЗАЕМ ДЛИННОЕ СООБЩЕНИЕ
                 if len(text) > 4000:
                     text = text[:4000] + "\n\n... (сообщение обрезано)"
                 

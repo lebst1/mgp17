@@ -12,6 +12,13 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
+def trim_text(text: str, max_len: int = 4000) -> str:
+    """Обрезает текст до максимальной длины"""
+    if len(text) > max_len:
+        return text[:max_len] + "\n\n... (сообщение обрезано)"
+    return text
+
+
 @router.message(Command("subscribe"))
 async def subscribe_info(message: Message):
     """Информация о подписке"""
@@ -42,6 +49,8 @@ async def subscribe_info(message: Message):
 /buy — купить подписку
 """
     
+    text = trim_text(text)
+    
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="💳 Купить 99₽", callback_data="subscribe_buy"),
@@ -60,11 +69,17 @@ async def subscribe_buy(callback: CallbackQuery):
     """Оплата подписки"""
     await callback.answer()
     
-    await callback.message.edit_text(
+    text = (
         "💳 <b>Оплата подписки</b>\n\n"
         "Скоро здесь появится возможность оплаты.\n"
         "А пока ты можешь использовать реферальную систему!\n\n"
-        "👥 Приведи друга и получи +5 дней бесплатно.",
+        "👥 Приведи друга и получи +5 дней бесплатно."
+    )
+    
+    text = trim_text(text)
+    
+    await callback.message.edit_text(
+        text,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="👥 Рефералка", callback_data="subscribe_referral")],
             [InlineKeyboardButton(text="🔙 Назад", callback_data="subscribe_back")]
@@ -82,11 +97,8 @@ async def subscribe_referral(callback: CallbackQuery):
     bot_username = settings.BOT_USERNAME or "laosllebot"
     ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
     
-    # Получаем информацию о подписке
     subscription = await SubscriptionRepository.get_or_create_subscription(user_id)
-    days_left = 0
-    if subscription.expires_at:
-        days_left = (subscription.expires_at - datetime.utcnow()).days
+    days_left = (subscription.expires_at - datetime.utcnow()).days if subscription.expires_at else 0
     
     text = f"""
 👥 <b>Реферальная программа</b>
@@ -105,6 +117,8 @@ async def subscribe_referral(callback: CallbackQuery):
 <b>Твой баланс:</b>
 📊 Осталось дней: {days_left if days_left > 0 else '0'}
 """
+    
+    text = trim_text(text)
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📋 Скопировать ссылку", callback_data="copy_referral")],
@@ -137,7 +151,6 @@ async def subscribe_back(callback: CallbackQuery):
 @router.message(Command("referral"))
 async def referral_command(message: Message):
     """Реферальная ссылка"""
-    # Создаем подписку если её нет
     await SubscriptionRepository.get_or_create_subscription(message.from_user.id)
     
     user_id = message.from_user.id
@@ -145,9 +158,7 @@ async def referral_command(message: Message):
     ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
     
     subscription = await SubscriptionRepository.get_or_create_subscription(user_id)
-    days_left = 0
-    if subscription.expires_at:
-        days_left = (subscription.expires_at - datetime.utcnow()).days
+    days_left = (subscription.expires_at - datetime.utcnow()).days if subscription.expires_at else 0
     
     text = f"""
 👥 <b>Твоя реферальная ссылка</b>
@@ -164,6 +175,8 @@ async def referral_command(message: Message):
 📊 Осталось дней: {days_left if days_left > 0 else '0'}
 """
     
+    text = trim_text(text)
+    
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📋 Скопировать ссылку", callback_data="copy_referral")],
         [InlineKeyboardButton(text="💳 Подписка", callback_data="subscribe_back")]
@@ -175,4 +188,4 @@ async def referral_command(message: Message):
 @router.message(Command("buy"))
 async def buy_command(message: Message):
     """Купить подписку"""
-    await subscribe_buy(message)
+    await subscribe_info(message)
