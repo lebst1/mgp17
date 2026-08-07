@@ -318,10 +318,10 @@ class Todo(Base):
 
     user = relationship("User", back_populates="todos")
 
-    __table_args__ = (
-        Index("ix_todos_user_id", "user_id"),
-        Index("ix_todos_is_done", "is_done"),
-    )
+    # __table_args__ = (
+    #     Index("ix_todos_user_id", "user_id"),
+    #     Index("ix_todos_is_done", "is_done"),
+    # )
 
 
 class Reminder(Base):
