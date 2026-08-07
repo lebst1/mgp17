@@ -138,7 +138,8 @@ async def handle_business_connection(event: BusinessConnection, bot: Bot):
         is_enabled=event.is_enabled
     )
     
-    try:
+    # ✅ ПРОВЕРКА ПОДПИСКИ ПРИ ПОДКЛЮЧЕНИИ
+    if user.has_active_subscription():
         await bot.send_message(
             chat_id=user_id,
             text="✅ Ваш бизнес-аккаунт подключен к SafeSaverX!\n\n"
@@ -146,10 +147,16 @@ async def handle_business_connection(event: BusinessConnection, bot: Bot):
                  "Чтобы проверить статус, отправьте /business_status"
         )
         logger.info(f"✅ Отправлено приветствие пользователю {user_id}")
-    except Exception as e:
-        logger.error(f"❌ Ошибка отправки приветствия: {e}")
-    
-    logger.info(f"✅ Пользователь {user_id} подключил бизнес-аккаунт")
+    else:
+        await bot.send_message(
+            chat_id=user_id,
+            text="⚠️ <b>Подписка неактивна</b>\n\n"
+                 "Вы подключили бота к бизнес-аккаунту, но для работы требуется подписка.\n\n"
+                 "💰 Купить подписку: /buy\n"
+                 "📋 Подробнее: /subscribe",
+            parse_mode="HTML"
+        )
+        logger.info(f"ℹ️ Пользователь {user_id} подключил бота без подписки")
 
 
 @router.business_message()
@@ -178,7 +185,14 @@ async def handle_business_message(message: Message):
             logger.warning(f"⚠️ Пользователь {message.from_user.id} не найден")
             return
     
+    # ✅ ПРОВЕРКА ПОДПИСКИ
+    if not user.has_active_subscription():
+        logger.info(f"⛔ Сообщение проигнорировано: у пользователя {user.telegram_id} нет подписки")
+        return
+    
+    # ✅ ПРОВЕРКА SAVEMODE
     if not user.savemode_enabled:
+        logger.info(f"ℹ️ SAVEMODE выключен для пользователя {user.telegram_id}")
         return
     
     try:
@@ -289,6 +303,16 @@ async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
         logger.warning(f"⚠️ Пользователь не найден для connection_id: {event.business_connection_id}")
         return
 
+    # ✅ ПРОВЕРКА ПОДПИСКИ
+    if not owner.has_active_subscription():
+        logger.info(f"⛔ Уведомление об удалении проигнорировано: у пользователя {owner.telegram_id} нет подписки")
+        return
+
+    # ✅ ПРОВЕРКА SAVEMODE
+    if not owner.savemode_enabled:
+        logger.info(f"ℹ️ SAVEMODE выключен для пользователя {owner.telegram_id}")
+        return
+
     for message_id in event.message_ids:
         try:
             saved_msg = await MessageRepository.get_by_id_and_chat(
@@ -328,6 +352,16 @@ async def handle_business_edited(message: Message):
     user = await BusinessRepository.get_user_by_connection(connection_id)
     if not user:
         logger.warning(f"⚠️ Пользователь не найден для connection_id: {connection_id}")
+        return
+    
+    # ✅ ПРОВЕРКА ПОДПИСКИ
+    if not user.has_active_subscription():
+        logger.info(f"⛔ Правка проигнорирована: у пользователя {user.telegram_id} нет подписки")
+        return
+
+    # ✅ ПРОВЕРКА SAVEMODE
+    if not user.savemode_enabled:
+        logger.info(f"ℹ️ SAVEMODE выключен для пользователя {user.telegram_id}")
         return
     
     logger.info(f"✏️ Отредактировано сообщение {message.message_id} от {user.telegram_id}")
@@ -394,6 +428,7 @@ async def business_status(message: Message):
 📝 SAVE MODE: {'✅ Включен' if user.savemode_enabled else '❌ Выключен'}
 🔗 Подключений: {len(connections)}
 📊 Сохранено сообщений: {user.messages_saved}
+💳 Подписка: {'✅ Активна' if user.has_active_subscription() else '❌ Истекла'}
 """
     
     if connections:
@@ -423,6 +458,13 @@ async def toggle_savemode(message: Message):
         return
     
     enabled = action == "on"
+    
+    # ✅ ПРОВЕРКА ПОДПИСКИ ПРИ ВКЛЮЧЕНИИ
+    user = await UserRepository.get_by_id(message.from_user.id)
+    if enabled and not user.has_active_subscription():
+        await message.answer("⛔ <b>Ошибка</b>\n\nДля включения SAVE MODE требуется активная подписка.\n\n💰 Купить подписку: /buy\n📋 Подробнее: /subscribe", parse_mode="HTML")
+        return
+    
     user = await UserRepository.update_settings(message.from_user.id, savemode_enabled=enabled)
     
     if not user:

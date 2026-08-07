@@ -26,6 +26,7 @@ MAX_MEDIA_FILES = 50
 MAX_MEDIA_AGE_DAYS = 1
 CHATS_PER_PAGE = 10
 MESSAGES_PER_PAGE = 15
+USERS_PER_PAGE = 15
 
 
 # ✅ УСТАНАВЛИВАЕМ МОСКОВСКОЕ ВРЕМЯ
@@ -59,6 +60,7 @@ class AdminStates(StatesGroup):
     waiting_for_sub_remove = State()
     waiting_for_sub_grant_user = State()
     waiting_for_sub_revoke_user = State()
+    waiting_for_user_search = State()  # 👈 НОВОЕ ДЛЯ ПОИСКА ПОЛЬЗОВАТЕЛЕЙ
 
 
 # ✅ ПРОВЕРКА АДМИНА (только владелец)
@@ -504,9 +506,14 @@ async def show_chats_list(target, user_id: int, page: int = 1):
         await target.answer("📭 Нет сохранённых чатов у этого пользователя.")
         return
     
+    # Формируем информацию о пользователе
+    user_info = f"👤 {user.first_name or user.username or 'Пользователь'}"
+    if user.username:
+        user_info += f" (@{user.username})"
+    
     text = f"""
 📋 <b>Чаты пользователя</b>
-👤 <b>{user.first_name or user.username or 'Пользователь'}</b>
+{user_info}
 🆔 <code>{user.telegram_id}</code>
 📊 <b>Всего чатов:</b> {total_chats}
 📄 <b>Страница {page} из {total_pages}</b>
@@ -708,6 +715,10 @@ async def admin_chat_more(callback: CallbackQuery):
         time_str = format_datetime(msg.saved_at)
         name = msg.from_username or msg.from_first_name or 'Аноним'
         
+        # Добавляем @username если есть
+        if msg.from_username:
+            name = f"{name} (@{msg.from_username})"
+        
         if msg.from_user_id == user_id:
             chat_text += f"\n👤 <b>{name}</b> [{time_str}]:\n"
         else:
@@ -815,10 +826,15 @@ async def show_chat_messages(target, user_id: int, chat_id: int, filter_type: st
     elif filter_type == "media":
         filter_text = " 🖼️ (только медиа)"
     
+    # Информация о пользователе с username
+    user_info = f"{user.first_name or user.username or 'Пользователь'}"
+    if user.username:
+        user_info += f" (@{user.username})"
+    
     header = f"""
 💬 <b>Чат: {chat_title_display}</b>{filter_text}
 
-👤 <b>{user.first_name or user.username or 'Пользователь'}</b>
+👤 <b>{user_info}</b>
 🆔 <code>{user.telegram_id}</code>
 💬 ID чата: <code>{chat_id}</code>
 📊 <b>Показано:</b> {len(messages)} из {total_count}
@@ -833,6 +849,10 @@ async def show_chat_messages(target, user_id: int, chat_id: int, filter_type: st
     for msg in reversed(messages):
         time_str = format_datetime(msg.saved_at)
         name = msg.from_username or msg.from_first_name or 'Аноним'
+        
+        # Добавляем @username если есть
+        if msg.from_username:
+            name = f"{name} (@{msg.from_username})"
         
         if msg.from_user_id == user_id:
             chat_text += f"\n👤 <b>{name}</b> [{time_str}]:\n"
@@ -1112,31 +1132,221 @@ async def process_ban_unban(message: Message, state: FSMContext):
     await state.clear()
 
 
-# ✅ СПИСОК ПОЛЬЗОВАТЕЛЕЙ
+# ✅ НОВЫЙ СПИСОК ПОЛЬЗОВАТЕЛЕЙ С ПАГИНАЦИЕЙ И КНОПКАМИ
+
 @router.callback_query(lambda c: c.data == "admin_users")
 async def admin_users(callback: CallbackQuery):
+    """Список пользователей с пагинацией и кнопками перехода в чат."""
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
+    await show_users_list(callback.message, 1)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin_users_page_"))
+async def admin_users_page(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    page = int(callback.data.split("_")[-1])
+    await show_users_list(callback.message, page)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin_user_chat_"))
+async def admin_user_chat(callback: CallbackQuery):
+    """Переход в чат пользователя по клику."""
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    user_id = int(callback.data.split("_")[-1])
+    await show_chats_list(callback.message, user_id, 1)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin_user_ban_"))
+async def admin_user_ban_from_list(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    user_id = int(callback.data.split("_")[-1])
+    user = await UserRepository.update_settings(user_id, is_active=False)
+    
+    if user:
+        await callback.answer(f"✅ Пользователь {user_id} заблокирован!", show_alert=True)
+        # Обновляем список
+        await show_users_list(callback.message, 1)
+    else:
+        await callback.answer(f"❌ Пользователь {user_id} не найден!", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data.startswith("admin_user_unban_"))
+async def admin_user_unban_from_list(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    user_id = int(callback.data.split("_")[-1])
+    user = await UserRepository.update_settings(user_id, is_active=True)
+    
+    if user:
+        await callback.answer(f"✅ Пользователь {user_id} разблокирован!", show_alert=True)
+        await show_users_list(callback.message, 1)
+    else:
+        await callback.answer(f"❌ Пользователь {user_id} не найден!", show_alert=True)
+
+
+async def show_users_list(target, page: int = 1, search_query: str = None):
+    """Отображает список пользователей с пагинацией и кнопками."""
+    USERS_PER_PAGE = 15
+    
     async with async_session() as session:
-        users = await session.scalars(select(User).limit(20).order_by(User.created_at.desc()))
+        # Базовый запрос
+        stmt = select(User)
+        if search_query:
+            stmt = stmt.where(
+                or_(
+                    User.telegram_id.ilike(f"%{search_query}%"),
+                    User.username.ilike(f"%{search_query}%"),
+                    User.first_name.ilike(f"%{search_query}%"),
+                )
+            )
+        
+        # Считаем общее количество
+        total_users = await session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+        total_pages = (total_users + USERS_PER_PAGE - 1) // USERS_PER_PAGE if total_users > 0 else 1
+        
+        # Пагинация
+        offset = (page - 1) * USERS_PER_PAGE
+        users = await session.scalars(
+            stmt.order_by(User.created_at.desc()).offset(offset).limit(USERS_PER_PAGE)
+        )
+        users = list(users)
     
-    text = "📋 <b>Последние 20 пользователей:</b>\n\n"
+    if not users:
+        text = "📋 <b>Пользователи</b>\n\nПользователей пока нет."
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
+        ])
+        await safe_edit_message(target, text, keyboard)
+        return
+    
+    text = f"📋 <b>Список пользователей</b> (стр. {page}/{total_pages}, всего: {total_users})\n\n"
+    
+    keyboard_buttons = []
+    
     for user in users:
-        text += f"👤 {user.telegram_id} | {user.first_name or user.username or 'No name'} | {'✅' if user.is_active else '🚫'}\n"
+        # Определяем статус подписки
+        sub_status = "✅" if user.has_active_subscription() else "❌"
+        sub_until = user.subscription_until.strftime("%d.%m") if user.subscription_until else "—"
+        
+        # Формируем имя пользователя
+        name = user.first_name or user.username or str(user.telegram_id)
+        if len(name) > 20:
+            name = name[:17] + "..."
+        
+        # Статус активности
+        status_icon = "🟢" if user.is_active else "🔴"
+        
+        # Количество сообщений
+        msg_count = user.messages_saved or 0
+        
+        # Формируем строку с username
+        user_line = f"{status_icon} <code>{user.telegram_id}</code>"
+        if user.username:
+            user_line += f" @{user.username}"
+        user_line += f" {name} | {sub_status} {sub_until} | 📊{msg_count}"
+        
+        text += user_line + "\n"
+        
+        # Кнопки для пользователя
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text=f"💬 {name[:12]}",
+                callback_data=f"admin_user_chat_{user.telegram_id}"
+            )
+        ])
+        
+        # Кнопки бана/разбана
+        if user.is_active:
+            keyboard_buttons.append([
+                InlineKeyboardButton(
+                    text="🚫 Бан",
+                    callback_data=f"admin_user_ban_{user.telegram_id}"
+                )
+            ])
+        else:
+            keyboard_buttons.append([
+                InlineKeyboardButton(
+                    text="✅ Разбан",
+                    callback_data=f"admin_user_unban_{user.telegram_id}"
+                )
+            ])
     
-    if len(text) > 4000:
-        text = text[:4000] + "\n... и еще"
+    # Навигация
+    nav_buttons = []
+    if page > 1:
+        nav_buttons.append(
+            InlineKeyboardButton(text="⬅️", callback_data=f"admin_users_page_{page-1}")
+        )
+    nav_buttons.append(
+        InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="admin_users_current")
+    )
+    if page < total_pages:
+        nav_buttons.append(
+            InlineKeyboardButton(text="➡️", callback_data=f"admin_users_page_{page+1}")
+        )
+    
+    if nav_buttons:
+        keyboard_buttons.append(nav_buttons)
+    
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="🔍 Поиск", callback_data="admin_users_search"),
+        InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")
+    ])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    await safe_edit_message(target, text, keyboard)
+
+
+@router.callback_query(lambda c: c.data == "admin_users_search")
+async def admin_users_search(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
     
     await safe_edit_message(
         callback.message,
-        text,
-        InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
-        ])
+        "🔍 <b>Поиск пользователей</b>\n\n"
+        "Введите ID, username или имя для поиска.\n\n"
+        "Отправьте /cancel для отмены.",
+        parse_mode="HTML"
     )
+    await state.set_state(AdminStates.waiting_for_user_search)
     await callback.answer()
+
+
+@router.message(AdminStates.waiting_for_user_search)
+async def process_user_search(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        await message.answer("⛔ Доступ запрещен")
+        await state.clear()
+        return
+    
+    query = message.text.strip()
+    if query.lower() == "/cancel":
+        await state.clear()
+        await show_admin_panel(message)
+        return
+    
+    await show_users_list(message, 1, query)
+    await state.clear()
 
 
 # ✅ ОЧИСТКА СТАРЫХ МЕДИА
@@ -1443,7 +1653,9 @@ async def admin_subscriptions(callback: CallbackQuery):
     else:
         for u in active:
             until = format_datetime(u.subscription_until)
-            text += f"👤 <code>{u.telegram_id}</code> | до {until}\n"
+            name = u.first_name or u.username or str(u.telegram_id)
+            username_str = f" (@{u.username})" if u.username else ""
+            text += f"👤 <code>{u.telegram_id}</code> {name}{username_str} | до {until}\n"
 
     await safe_edit_message(
         callback.message,
@@ -1480,7 +1692,9 @@ async def admin_referrals(callback: CallbackQuery):
         text += "Пока нет рефералов."
     else:
         for u in top:
-            text += f"👤 <code>{u.telegram_id}</code> — {u.referrals_count} реф., {u.referral_days_earned} дн.\n"
+            name = u.first_name or u.username or str(u.telegram_id)
+            username_str = f" (@{u.username})" if u.username else ""
+            text += f"👤 <code>{u.telegram_id}</code> {name}{username_str} — {u.referrals_count} реф., {u.referral_days_earned} дн.\n"
 
     await safe_edit_message(
         callback.message,

@@ -59,7 +59,7 @@ class User(Base):
     can_use_ai = Column(Boolean, default=True)
     can_use_dot_commands = Column(Boolean, default=True)
 
-    savemode_enabled = Column(Boolean, default=True)
+    savemode_enabled = Column(Boolean, default=False)
     autoreply_enabled = Column(Boolean, default=False)
     digest_enabled = Column(Boolean, default=False)
     digest_time = Column(String(10), default="09:00")
