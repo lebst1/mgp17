@@ -1336,13 +1336,10 @@ async def delete_user(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-    
-    logger.info(f"🔍 delete_user: {callback.data}")
-    
+
     user_id = int(callback.data.split("_")[-1])
-    
     await callback.answer("⏳ Удаление...", show_alert=False)
-    
+
     try:
         async with async_session() as session:
             # 1. Удаляем сообщения и медиа
@@ -1354,18 +1351,11 @@ async def delete_user(callback: CallbackQuery):
                 if msg.media_path and os.path.exists(msg.media_path):
                     try:
                         os.remove(msg.media_path)
-                    except:
+                    except Exception:
                         pass
                 await session.delete(msg)
                 deleted_messages += 1
-            
-            # ❌ ЗАКОММЕНТИРУЙ ЭТОТ БЛОК:
-            # todos = await session.scalars(
-            #     select(Todo).where(Todo.user_id == user_id)
-            # )
-            # for todo in todos:
-            #     await session.delete(todo)
-            
+
             # 2. Удаляем реферальные бонусы
             bonuses = await session.scalars(
                 select(ReferralBonus).where(
@@ -1377,27 +1367,28 @@ async def delete_user(callback: CallbackQuery):
             )
             for bonus in bonuses:
                 await session.delete(bonus)
-            
+
             # 3. Удаляем бизнес-подключения
             connections = await session.scalars(
                 select(BusinessConnection).where(BusinessConnection.user_id == user_id)
             )
             for conn in connections:
                 await session.delete(conn)
-            
+
             # 4. Удаляем самого пользователя
             user = await session.scalar(
                 select(User).where(User.telegram_id == user_id)
             )
             if user:
                 await session.delete(user)
-            
+
             await session.commit()
-        
+
+        # ✅ Сообщение об успехе
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Назад к списку", callback_data="admin_users")]
         ])
-        
+
         await callback.message.edit_text(
             f"✅ Пользователь <code>{user_id}</code> ПОЛНОСТЬЮ УДАЛЕН!\n\n"
             f"Удалено сообщений: {deleted_messages}",
@@ -1405,13 +1396,14 @@ async def delete_user(callback: CallbackQuery):
             parse_mode="HTML"
         )
         await callback.answer("✅ Пользователь удален!", show_alert=True)
-        
+
     except Exception as e:
         logger.error(f"❌ Ошибка удаления пользователя {user_id}: {e}")
+        # Обрезаем сообщение об ошибке, чтобы не превысить лимит Telegram
         error_msg = str(e)
         if len(error_msg) > 200:
             error_msg = error_msg[:200] + "..."
-        
+
         await callback.message.answer(
             f"❌ Ошибка при удалении: {error_msg}",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
