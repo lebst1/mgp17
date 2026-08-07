@@ -4,6 +4,7 @@ from aiogram.filters import Command
 
 from src.config import settings
 from src.db.repositories.user_repository import UserRepository
+from src.db.models import ReferralBonusStatus
 
 router = Router()
 
@@ -18,21 +19,15 @@ async def build_profile_text(user) -> str:
     sub = user.get_subscription_info()
     until = _format_date(sub["subscription_until"])
 
-    # Безопасное получение количества рефералов
-    try:
-        referrals_count = len(user.direct_referrals) if user.direct_referrals else 0
-    except:
-        referrals_count = 0
+    # Подсчет рефералов через связь direct_referrals
+    referrals_count = len(user.direct_referrals) if user.direct_referrals else 0
     
-    # Безопасное получение заработанных дней
+    # Подсчет заработанных дней через бонусы (только выпущенные)
     referral_days_earned = 0
-    try:
-        if user.bonuses_as_referrer:
-            for bonus in user.bonuses_as_referrer:
-                if bonus.status.value == "released":
-                    referral_days_earned += bonus.referrer_days
-    except:
-        referral_days_earned = 0
+    if user.bonuses_as_referrer:
+        for bonus in user.bonuses_as_referrer:
+            if bonus.status == ReferralBonusStatus.RELEASED:
+                referral_days_earned += bonus.referrer_days
 
     return f"""
 👤 <b>Личный кабинет</b>

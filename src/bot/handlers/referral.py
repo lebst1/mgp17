@@ -21,14 +21,14 @@ def get_referral_link(referral_code: str) -> str:
     Бот (start.py) парсит `ref_CODE` → CODE, находит реферера по referral_code
     и привязывает referred_by.
     """
-    username = settings.BOT_USERNAME or "SafeSaverX_bot"
+    username = settings.BOT_USERNAME or "laosllebot"
     clean_username = username.lstrip("@")
     return f"https://t.me/{clean_username}?start=ref_{referral_code}"
 
 
 def get_referral_link_legacy(telegram_id: int) -> str:
     """Legacy-вариант для обратной совместимости (сырой telegram_id)."""
-    username = settings.BOT_USERNAME or "SafeSaverX_bot"
+    username = settings.BOT_USERNAME or "laosllebot"
     return f"https://t.me/{username.lstrip('@')}?start={telegram_id}"
 
 
@@ -55,7 +55,14 @@ async def build_referral_text(user) -> str:
 
     own_bonus_info = ""
     try:
-        own_bonus = await ReferralRepository.get_bonus_for_referred(user.telegram_id)
+        # Используем связи из модели вместо несуществующего метода
+        own_bonus = None
+        if hasattr(user, 'bonuses_as_referred'):
+            for bonus in user.bonuses_as_referred:
+                if bonus.referred_id == user.telegram_id:
+                    own_bonus = bonus
+                    break
+        
         if own_bonus:
             status_label = _status_label(own_bonus.status.value)
             icon = _status_icon(own_bonus.status)

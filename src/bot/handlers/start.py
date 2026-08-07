@@ -52,13 +52,16 @@ async def get_main_menu(user, has_business):
     referred_note = ""
     if user.referred_by:
         try:
-            bonus = await ReferralRepository.get_bonus_for_referred(user.telegram_id)
-            if bonus:
-                from src.db.models import ReferralBonusStatus
-                if bonus.status == ReferralBonusStatus.HELD:
-                    referred_note = "\n🎟 <i>Вы приглашены. Бонус будет начислен после первой оплаты.</i>"
-                elif bonus.status == ReferralBonusStatus.RELEASED:
-                    referred_note = f"\n🎁 <i>Реф-бонус начислен: +{bonus.referred_days} дн.</i>"
+            # Используем связи из модели вместо несуществующего метода
+            from src.db.models import ReferralBonusStatus
+            if hasattr(user, 'bonuses_as_referred'):
+                for bonus in user.bonuses_as_referred:
+                    if bonus.referred_id == user.telegram_id:
+                        if bonus.status == ReferralBonusStatus.HELD:
+                            referred_note = "\n🎟 <i>Вы приглашены. Бонус будет начислен после первой оплаты.</i>"
+                        elif bonus.status == ReferralBonusStatus.RELEASED:
+                            referred_note = f"\n🎁 <i>Реф-бонус начислен: +{bonus.referred_days} дн.</i>"
+                        break
         except Exception:
             pass
 
@@ -70,19 +73,18 @@ async def get_main_menu(user, has_business):
 ▸ Подписка: <b>{sub['status']}</b> (до {until})
 ▸ Реф-код: <code>{user.referral_code or '-'}</code>
 ▸ SAVE MODE: <b>{'включен' if user.savemode_enabled else 'выключен'}</b>
-▸ Business: <b>{'подключен' if has_business else 'не подключен'}</b>{referred_note}
 
 📌 <b>Как подключить бота:</b>
 1. Нажми «📋 Скопировать юзернейм»
 2. Открой Настройки Telegram → Редактирование профиля
 3. Выбери «Автоматизация действий»
 4. Вставь скопированный юзернейм
-5. Дай ВСЕ разрешения!
+5. Дай разрешения на все сообщения!
 
 <b>Что умеет бот:</b>
 • Присылает уведомления, когда собеседник удаляет сообщение
 • Присылает уведомления, когда собеседник редактирует сообщение
-• Сохраняет сгорающие фото, голосовые и видео
+• Сохраняет фото, голосовые и видео
 """
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -212,7 +214,7 @@ async def important(callback: CallbackQuery):
 
 1️⃣ Дай ВСЕ разрешения на работу с сообщениями
 2️⃣ Бот присылает уведомления при удалении/правке
-3️⃣ Сохраняет сгорающие фото, голосовые и видео
+3️⃣ Сохраняет фото, голосовые и видео
 """
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")],
