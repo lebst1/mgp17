@@ -5,7 +5,6 @@ import os
 import logging
 import re
 
-from aiogram.types import InlineKeyboardButton, CopyTextButton
 from src.config import settings
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.business_repository import BusinessRepository
@@ -90,11 +89,7 @@ async def get_main_menu(user, has_business):
             InlineKeyboardButton(text="📝 SAVE MODE", callback_data="savemode"),
         ],
         [
-            InlineKeyboardButton(
-                text="📋 Скопировать юзернейм",
-                callback_data="copy_username",
-                copy_text=CopyTextButton(text=f"@{settings.BOT_USERNAME.lstrip('@')}")
-),
+            InlineKeyboardButton(text="📋 Скопировать юзернейм", callback_data="copy_username"),
         ],
         [
             InlineKeyboardButton(text="❓ Описание команд", callback_data="show_help"),
@@ -164,11 +159,12 @@ async def start_command(message: Message):
 
 @router.callback_query(lambda c: c.data == "copy_username")
 async def copy_username(callback: CallbackQuery):
-    bot_username = settings.BOT_USERNAME or "laosllebot"
+    bot_username = settings.BOT_USERNAME or "SafeSaverX_bot"
     await callback.answer(
         text=f"✅ @{bot_username.lstrip('@')} скопирован!\n\nОткрой Настройки → Редактирование профиля → Автоматизация действий и вставь юзернейм.",
         show_alert=True,
     )
+
 
 @router.callback_query(lambda c: c.data == "edit_profile")
 async def edit_profile(callback: CallbackQuery):

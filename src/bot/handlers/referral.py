@@ -19,19 +19,12 @@ logger = logging.getLogger(__name__)
 
 
 def get_referral_link(referral_code: str) -> str:
-    """Генерирует глубокую реферальную ссылку с ?ref=CODE.
-
-    Используется формат: t.me/BOT_USERNAME?start=ref_CODE
-    Бот (start.py) парсит `ref_CODE` → CODE, находит реферера по referral_code
-    и привязывает referred_by.
-    """
     username = settings.BOT_USERNAME or "laosllebot"
     clean_username = username.lstrip("@")
     return f"https://t.me/{clean_username}?start=ref_{referral_code}"
 
 
 def get_referral_link_legacy(telegram_id: int) -> str:
-    """Legacy-вариант для обратной совместимости (сырой telegram_id)."""
     username = settings.BOT_USERNAME or "laosllebot"
     return f"https://t.me/{username.lstrip('@')}?start={telegram_id}"
 
@@ -59,16 +52,12 @@ async def build_referral_text(user, session=None) -> str:
 
     own_bonus_info = ""
     try:
-        # Если переданная сессия активна, используем её для загрузки данных
         if session:
-            # Убеждаемся, что данные загружены через сессию
             if not hasattr(user, 'bonuses_as_referred') or not user.bonuses_as_referred:
-                # Пробуем загрузить через сессию
                 stmt = select(User).where(User.telegram_id == user.telegram_id).options(selectinload(User.bonuses_as_referred))
                 user_refreshed = await session.execute(stmt)
                 user = user_refreshed.scalar_one_or_none()
                 
-        # Теперь пробуем получить бонус
         own_bonus = None
         if user and hasattr(user, 'bonuses_as_referred'):
             for bonus in user.bonuses_as_referred:
@@ -96,7 +85,7 @@ async def build_referral_text(user, session=None) -> str:
         "",
         "Приглашай друзей и получай бонусы!",
         "",
-        f"<b>Твоя ссылка (глубокая, ?ref=CODE):</b>",
+        f"<b>Твоя ссылка:</b>",
         f"<code>{link}</code>",
         "",
         f"🏷 <b>Твой реф-код:</b> <code>{user.referral_code or '-'}</code>",
@@ -111,11 +100,11 @@ async def build_referral_text(user, session=None) -> str:
         f"💎 Заработано: <b>+{total_earned} дн.</b>",
         f"🔒 В ожидании (заморожено): <b>+{total_pending_days} дн.</b>",
         "",
-        "<b>Бонусы (после ПЕРВОЙ успешной оплаты рефералом):</b>",
+        "<b>Бонусы за регистрацию:</b>",
         f"• Приглашённый пользователь: <b>+{settings.REFERRAL_BONUS_REFERRED_DAYS} день</b>",
         f"• Ты за каждого реферала: <b>+{settings.REFERRAL_BONUS_REFERRER_DAYS} дня</b>",
         "",
-        "⚠️ <b>Важно:</b> Бонусы начисляются не за регистрацию, а только после ПЕРВОЙ оплаты!",
+        "🎁 <b>Бонусы начисляются СРАЗУ после регистрации!</b>",
     ]
     if own_bonus_info:
         parts.append(own_bonus_info)
@@ -135,21 +124,18 @@ async def ref_command(message: Message):
     try:
         user_id = message.from_user.id
         
-        # Используем сессию для загрузки пользователя с бонусами
         async with async_session() as session:
             stmt = select(User).where(User.telegram_id == user_id).options(selectinload(User.bonuses_as_referred))
             result = await session.execute(stmt)
             user = result.scalar_one_or_none()
             
             if not user:
-                # Если пользователь не найден, создаем нового
                 user, _ = await UserRepository.get_or_create(
                     telegram_id=user_id,
                     username=message.from_user.username,
                     first_name=message.from_user.first_name,
                     last_name=message.from_user.last_name,
                 )
-                # Обновляем пользователя с бонусами
                 stmt = select(User).where(User.telegram_id == user_id).options(selectinload(User.bonuses_as_referred))
                 result = await session.execute(stmt)
                 user = result.scalar_one()

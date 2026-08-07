@@ -394,6 +394,9 @@ async def process_search(message: Message, state: FSMContext):
             InlineKeyboardButton(text="✅ Разбанить", callback_data=f"admin_unban_user_{user.telegram_id}")
         ],
         [
+            InlineKeyboardButton(text="📋 Меню пользователя", callback_data=f"admin_user_menu_{user.telegram_id}")
+        ],
+        [
             InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")
         ]
     ])
@@ -1166,6 +1169,116 @@ async def admin_user_chat(callback: CallbackQuery):
     await callback.answer()
 
 
+@router.callback_query(lambda c: c.data.startswith("admin_user_menu_"))
+async def admin_user_menu(callback: CallbackQuery):
+    """Меню управления пользователем."""
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    user_id = int(callback.data.split("_")[-1])
+    user = await UserRepository.get_by_id(user_id)
+    if not user:
+        await callback.answer("❌ Пользователь не найден", show_alert=True)
+        return
+    
+    sub_status = "✅ Активна" if user.has_active_subscription() else "❌ Истекла"
+    sub_until = user.subscription_until.strftime("%d.%m.%Y") if user.subscription_until else "—"
+    status_icon = "🟢 Активен" if user.is_active else "🔴 Заблокирован"
+    
+    text = f"""
+📋 <b>Меню пользователя</b>
+
+━━━━━━━━━━━━━━━━━━━━━
+🆔 ID: <code>{user.telegram_id}</code>
+👤 Имя: {user.first_name or 'Не указано'}
+📛 Юзернейм: @{user.username or 'Нет'}
+✅ Статус: {status_icon}
+💳 Подписка: {sub_status} (до {sub_until})
+📊 Сообщений: {user.messages_saved or 0}
+🎁 Рефералов: {len(user.direct_referrals) if user.direct_referrals else 0}
+📅 Зарегистрирован: {format_datetime(user.created_at)}
+━━━━━━━━━━━━━━━━━━━━━
+
+Выберите действие:
+"""
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="💬 Чаты", callback_data=f"admin_chats_user_{user_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="🚫 Забанить", callback_data=f"admin_ban_user_{user_id}"),
+            InlineKeyboardButton(text="✅ Разбанить", callback_data=f"admin_unban_user_{user_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="➕ Выдать подписку", callback_data=f"admin_user_grant_sub_{user_id}"),
+            InlineKeyboardButton(text="➖ Забрать подписку", callback_data=f"admin_user_revoke_sub_{user_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="🗑️ Удалить из БД", callback_data=f"admin_user_delete_{user_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Назад к списку", callback_data="admin_users"),
+        ]
+    ])
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin_user_grant_sub_"))
+async def admin_user_grant_sub(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    user_id = int(callback.data.split("_")[-1])
+    await state.update_data(grant_user_id=user_id)
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="1 день", callback_data="admin_grant_days_1"),
+            InlineKeyboardButton(text="7 дней", callback_data="admin_grant_days_7"),
+        ],
+        [
+            InlineKeyboardButton(text="30 дней", callback_data="admin_grant_days_30"),
+            InlineKeyboardButton(text="90 дней", callback_data="admin_grant_days_90"),
+        ],
+        [
+            InlineKeyboardButton(text="365 дней", callback_data="admin_grant_days_365"),
+        ],
+        [InlineKeyboardButton(text="🔙 Отмена", callback_data=f"admin_user_menu_{user_id}")],
+    ])
+    
+    await safe_edit_message(
+        callback.message,
+        f"👤 Пользователь: <code>{user_id}</code>\n\nВыбери срок подписки:",
+        keyboard,
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin_user_revoke_sub_"))
+async def admin_user_revoke_sub(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    user_id = int(callback.data.split("_")[-1])
+    user = await UserRepository.revoke_subscription(user_id)
+    
+    if user:
+        await callback.answer(f"✅ Подписка пользователя {user_id} отозвана!", show_alert=True)
+        await admin_user_menu(callback)
+    else:
+        await callback.answer(f"❌ Пользователь {user_id} не найден!", show_alert=True)
+
+
 @router.callback_query(lambda c: c.data.startswith("admin_user_delete_"))
 async def admin_user_delete(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
@@ -1177,7 +1290,7 @@ async def admin_user_delete(callback: CallbackQuery):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"admin_user_delete_confirm_{user_id}"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data="admin_users"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin_user_menu_{user_id}"),
         ]
     ])
     
@@ -1257,7 +1370,7 @@ async def admin_user_delete_confirm(callback: CallbackQuery):
 
 
 async def show_users_list(target, page: int = 1, search_query: str = None):
-    """Отображает список пользователей с пагинацией и кнопками перехода в чат."""
+    """Отображает список пользователей с пагинацией и кнопками."""
     USERS_PER_PAGE = 15
     
     async with async_session() as session:
@@ -1308,15 +1421,8 @@ async def show_users_list(target, page: int = 1, search_query: str = None):
         
         keyboard_buttons.append([
             InlineKeyboardButton(
-                text=f"💬 {name[:15]}",
-                callback_data=f"admin_user_chat_{user.telegram_id}"
-            )
-        ])
-        
-        keyboard_buttons.append([
-            InlineKeyboardButton(
-                text=f"🗑️ Удалить",
-                callback_data=f"admin_user_delete_{user.telegram_id}"
+                text=f"📋 {name[:12]}",
+                callback_data=f"admin_user_menu_{user.telegram_id}"
             )
         ])
     
