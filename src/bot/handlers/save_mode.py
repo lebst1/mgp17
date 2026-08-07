@@ -3,7 +3,10 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.filters import Command
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.message_repository import MessageRepository
-from src.config import settings
+from src.db.session import async_session
+from sqlalchemy import select, func
+from src.db.models import SavedMessage
+from src.config import settings  # 👈 ЭТОТ ИМПОРТ БЫЛ ПРОПУЩЕН
 
 router = Router()
 
@@ -16,7 +19,6 @@ async def savemode_menu(message: Message):
         await message.answer("❌ Пользователь не найден")
         return
     
-    # Текущий статус SAVE MODE
     status_text = "✅ Включен" if user.savemode_enabled else "❌ Выключен"
     sub_status = "✅ Активна" if user.has_active_subscription() else "❌ Истекла"
     
@@ -53,19 +55,65 @@ SAVE MODE позволяет сохранять удаленные и отред
     await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 
-@router.callback_query(lambda c: c.data == "savemode_toggle_on")
-async def savemode_toggle_on(callback: CallbackQuery):
-    """Включение SAVE MODE с проверкой подписки"""
+@router.callback_query(F.data == "savemode")
+async def savemode_callback(callback: CallbackQuery):
+    """Обработчик кнопки SAVE MODE из главного меню"""
     user = await UserRepository.get_by_id(callback.from_user.id)
     if not user:
         await callback.answer("❌ Пользователь не найден", show_alert=True)
         return
     
-    # ✅ Проверка подписки
+    status_text = "✅ Включен" if user.savemode_enabled else "❌ Выключен"
+    sub_status = "✅ Активна" if user.has_active_subscription() else "❌ Истекла"
+    
+    text = f"""
+📝 <b>SAVE MODE</b>
+
+Текущий статус: <b>{status_text}</b>
+Подписка: <b>{sub_status}</b>
+
+SAVE MODE позволяет сохранять удаленные и отредактированные сообщения, а также медиа-файлы из ваших бизнес-чатов.
+
+💡 <b>Как работает:</b>
+• Бот сохраняет все сообщения в выбранных чатах
+• При удалении сообщения — вы получите уведомление с текстом
+• При редактировании — вы увидите старую и новую версии
+• Медиа-файлы сохраняются локально
+
+⚠️ <b>Важно:</b> Для работы SAVE MODE требуется активная подписка!
+"""
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Включить", callback_data="savemode_toggle_on"),
+            InlineKeyboardButton(text="❌ Выключить", callback_data="savemode_toggle_off"),
+        ],
+        [
+            InlineKeyboardButton(text="📊 Статистика сохранений", callback_data="savemode_stats"),
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start"),
+        ]
+    ])
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "savemode_toggle_on")
+async def savemode_toggle_on(callback: CallbackQuery):
+    user = await UserRepository.get_by_id(callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Пользователь не найден", show_alert=True)
+        return
+    
     if not user.has_active_subscription():
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💳 Купить подписку", callback_data="subscribe_buy")],
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="savemode_back")],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")],
         ])
         await callback.message.edit_text(
             "⛔ <b>Ошибка!</b>\n\n"
@@ -82,7 +130,6 @@ async def savemode_toggle_on(callback: CallbackQuery):
         await callback.answer("⛔ Требуется подписка!", show_alert=True)
         return
     
-    # Включаем SAVE MODE
     user = await UserRepository.update_settings(callback.from_user.id, savemode_enabled=True)
     if user:
         await callback.message.edit_text(
@@ -91,7 +138,7 @@ async def savemode_toggle_on(callback: CallbackQuery):
             "Вы будете получать уведомления при удалении и редактировании сообщений.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="📊 Статистика", callback_data="savemode_stats")],
-                [InlineKeyboardButton(text="🔙 Назад", callback_data="savemode_back")],
+                [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")],
             ]),
             parse_mode="HTML"
         )
@@ -100,9 +147,8 @@ async def savemode_toggle_on(callback: CallbackQuery):
         await callback.answer("❌ Ошибка при включении", show_alert=True)
 
 
-@router.callback_query(lambda c: c.data == "savemode_toggle_off")
+@router.callback_query(F.data == "savemode_toggle_off")
 async def savemode_toggle_off(callback: CallbackQuery):
-    """Выключение SAVE MODE"""
     user = await UserRepository.update_settings(callback.from_user.id, savemode_enabled=False)
     if user:
         await callback.message.edit_text(
@@ -111,7 +157,7 @@ async def savemode_toggle_off(callback: CallbackQuery):
             "Вы не будете получать уведомления об удалениях и правках.\n\n"
             "Чтобы снова включить SAVE MODE, используйте команду /savemode",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔙 Назад", callback_data="savemode_back")],
+                [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")],
             ]),
             parse_mode="HTML"
         )
@@ -120,22 +166,12 @@ async def savemode_toggle_off(callback: CallbackQuery):
         await callback.answer("❌ Ошибка при выключении", show_alert=True)
 
 
-@router.callback_query(lambda c: c.data == "savemode_stats")
+@router.callback_query(F.data == "savemode_stats")
 async def savemode_stats(callback: CallbackQuery):
-    """Статистика сохраненных сообщений"""
     user = await UserRepository.get_by_id(callback.from_user.id)
     if not user:
         await callback.answer("❌ Пользователь не найден", show_alert=True)
         return
-    
-    # Получаем статистику
-    deleted = await MessageRepository.get_recent_deleted(user.telegram_id, limit=100)
-    deleted_count = len(deleted)
-    
-    # Общее количество сохраненных сообщений
-    from src.db.session import async_session
-    from sqlalchemy import select, func
-    from src.db.models import SavedMessage
     
     async with async_session() as session:
         total = await session.scalar(
@@ -164,82 +200,34 @@ async def savemode_stats(callback: CallbackQuery):
 Текущий статус: <b>{status}</b>
 
 📝 <b>Сохранено сообщений:</b> {total}
-🗑️ <b>Удалено:</b> {deleted_count}
 ✏️ <b>Отредактировано:</b> {edited}
 🖼️ <b>Медиа-файлов:</b> {media}
-
-📅 <b>Последние удаленные сообщения:</b>
 """
-    
-    if deleted:
-        for i, msg in enumerate(deleted[:5], 1):
-            chat = msg.chat_title or f"Чат {msg.chat_id}"
-            from_user = msg.from_username or msg.from_first_name or 'Аноним'
-            text += f"{i}. {chat} — {from_user} ({msg.saved_at.strftime('%d.%m %H:%M')})\n"
-    else:
-        text += "Нет удаленных сообщений."
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔄 Обновить", callback_data="savemode_stats")],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="savemode_back")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")],
     ])
     
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
 
 
-@router.callback_query(lambda c: c.data == "savemode_back")
-async def savemode_back(callback: CallbackQuery):
-    """Возврат в меню SAVE MODE"""
-    await savemode_menu(callback.message)
-    await callback.answer()
-
-
-# ✅ Команда /savemode on (для обратной совместимости)
+# Команда /savemode on/off для обратной совместимости
 @router.message(Command("savemode_on"))
 async def savemode_on_legacy(message: Message):
-    """Legacy команда для включения"""
     user = await UserRepository.get_by_id(message.from_user.id)
     if not user:
         await message.answer("❌ Пользователь не найден")
         return
-    
     if not user.has_active_subscription():
-        await message.answer(
-            "⛔ <b>Ошибка!</b>\n\n"
-            f"Для включения SAVE MODE требуется активная подписка.\n\n"
-            f"💰 Купить подписку: /buy\n"
-            f"📋 Подробнее: /subscribe",
-            parse_mode="HTML"
-        )
+        await message.answer("⛔ Для включения SAVE MODE требуется активная подписка.", parse_mode="HTML")
         return
-    
     user = await UserRepository.update_settings(message.from_user.id, savemode_enabled=True)
-    if user:
-        await message.answer("✅ SAVE MODE включен!")
+    await message.answer("✅ SAVE MODE включен!" if user else "❌ Ошибка")
 
 
 @router.message(Command("savemode_off"))
 async def savemode_off_legacy(message: Message):
-    """Legacy команда для выключения"""
     user = await UserRepository.update_settings(message.from_user.id, savemode_enabled=False)
-    if user:
-        await message.answer("❌ SAVE MODE выключен!")
-
-
-# ✅ Старые callback'и для совместимости
-@router.callback_query(lambda c: c.data == "savemode_on")
-async def savemode_on_old(callback: CallbackQuery):
-    await savemode_toggle_on(callback)
-
-
-@router.callback_query(lambda c: c.data == "savemode_off")
-async def savemode_off_old(callback: CallbackQuery):
-    await savemode_toggle_off(callback)
-
-
-@router.callback_query(lambda c: c.data == "savemode_settings")
-async def savemode_settings_old(callback: CallbackQuery):
-    """Старый callback для совместимости"""
-    await savemode_menu(callback.message)
-    await callback.answer()
+    await message.answer("❌ SAVE MODE выключен!" if user else "❌ Ошибка")

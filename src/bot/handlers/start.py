@@ -5,6 +5,7 @@ import os
 import logging
 import re
 
+from src.config import settings
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.business_repository import BusinessRepository
 from src.db.repositories.referral_repository import ReferralRepository
@@ -21,14 +22,6 @@ _REF_PATTERNS = [
 
 
 def _extract_referral_code(raw_deeplink: str) -> str | None:
-    """Извлекает ref-код из deep-link аргумента команды /start.
-
-    Поддерживаемые форматы (для t.me/bot?start=...):
-      - `ref_CODE`  → `CODE`
-      - `r_CODE`    → `CODE`
-      - просто число (legacy telegram_id)
-      - `CODE` сам по себе, если совпадает с форматом referral_code
-    """
     if not raw_deeplink:
         return None
     arg = raw_deeplink.strip()
@@ -52,7 +45,6 @@ async def get_main_menu(user, has_business):
     referred_note = ""
     if user.referred_by:
         try:
-            # Используем связи из модели вместо несуществующего метода
             from src.db.models import ReferralBonusStatus
             if hasattr(user, 'bonuses_as_referred'):
                 for bonus in user.bonuses_as_referred:
@@ -71,8 +63,8 @@ async def get_main_menu(user, has_business):
 👤 <b>Профиль</b>
 ▸ Статус: <b>{'активен' if user.is_active else 'неактивен'}</b>
 ▸ Подписка: <b>{sub['status']}</b> (до {until})
-▸ Реф-код: <code>{user.referral_code or '-'}</code>
 ▸ SAVE MODE: <b>{'включен' if user.savemode_enabled else 'выключен'}</b>
+▸ Business: <b>{'подключен' if has_business else 'не подключен'}</b>{referred_note}
 
 📌 <b>Как подключить бота:</b>
 1. Нажми «📋 Скопировать юзернейм»
@@ -88,25 +80,22 @@ async def get_main_menu(user, has_business):
 """
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-    [
-        InlineKeyboardButton(text="👤 Профиль", callback_data="profile_menu"),
-        InlineKeyboardButton(text="🎁 Рефералы", callback_data="referral_menu"),
-    ],
-    [
-        InlineKeyboardButton(text="💳 Подписка", callback_data="subscribe_menu"),
-        InlineKeyboardButton(text="⚙ Настройки", callback_data="settings"),
-    ],
-    [
-        InlineKeyboardButton(text="📝 SAVE MODE", callback_data="savemode"),  # 👈 Новая кнопка
-    ],
-    [
-        InlineKeyboardButton(text="📋 Скопировать юзернейм", callback_data="copy_username"),
-    ],
-    [
-        InlineKeyboardButton(text="❓ Описание команд", callback_data="show_help"),
-        InlineKeyboardButton(text="⭐ Важное", callback_data="important"),
-    ],
-])
+        [
+            InlineKeyboardButton(text="👤 Профиль", callback_data="profile_menu"),
+            InlineKeyboardButton(text="🎁 Рефералы", callback_data="referral_menu"),
+        ],
+        [
+            InlineKeyboardButton(text="💳 Подписка", callback_data="subscribe_menu"),
+            InlineKeyboardButton(text="📝 SAVE MODE", callback_data="savemode"),
+        ],
+        [
+            InlineKeyboardButton(text="📋 Скопировать юзернейм", callback_data="copy_username"),
+        ],
+        [
+            InlineKeyboardButton(text="❓ Описание команд", callback_data="show_help"),
+            InlineKeyboardButton(text="⭐ Важное", callback_data="important"),
+        ],
+    ])
 
     return text, keyboard
 
@@ -170,8 +159,10 @@ async def start_command(message: Message):
 
 @router.callback_query(lambda c: c.data == "copy_username")
 async def copy_username(callback: CallbackQuery):
+    # Копируем юзернейм бота из настроек
+    bot_username = settings.BOT_USERNAME or "SafeSaverX_bot"
     await callback.answer(
-        text="✅ @SafeSaverX_bot скопирован!\n\nОткрой Настройки → Редактирование профиля → Автоматизация действий и вставь юзернейм.",
+        text=f"✅ @{bot_username.lstrip('@')} скопирован!\n\nОткрой Настройки → Редактирование профиля → Автоматизация действий и вставь юзернейм.",
         show_alert=True,
     )
 
@@ -192,10 +183,9 @@ async def show_help(callback: CallbackQuery):
 /start — Главное меню
 /profile — Личный кабинет
 /ref — Реферальная система
-/buy — Купить подписку
-/settings — Настройки
-/savemode on — Включить SAVE MODE
-/savemode off — Выключить SAVE MODE
+/pay — Купить подписку
+/subscribe — Информация о подписке
+/savemode — Настройки SAVE MODE
 """
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")],
@@ -232,51 +222,6 @@ async def important(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(lambda c: c.data == "settings")
-async def show_settings(callback: CallbackQuery):
-    text = """
-⚙ <b>Настройки</b>
-
-▸ SAVE MODE — включить/выключить сохранение
-"""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📝 SAVE MODE", callback_data="savemode_settings")],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")],
-    ])
-
-    try:
-        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-    except Exception:
-        await callback.message.delete()
-        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
-
-    await callback.answer()
-
-
-@router.callback_query(lambda c: c.data == "savemode_settings")
-async def savemode_settings(callback: CallbackQuery):
-    text = """
-📝 <b>SAVE MODE</b>
-
-▸ Включить / Выключить сохранение
-"""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ Включить", callback_data="savemode_on"),
-            InlineKeyboardButton(text="❌ Выключить", callback_data="savemode_off"),
-        ],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="settings")],
-    ])
-
-    try:
-        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-    except Exception:
-        await callback.message.delete()
-        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
-
-    await callback.answer()
-
-
 @router.callback_query(lambda c: c.data == "back_to_start")
 async def back_to_start(callback: CallbackQuery):
     await callback.answer()
@@ -301,21 +246,6 @@ async def back_to_start(callback: CallbackQuery):
     await send_main_menu(callback.message, user, has_business)
 
 
-@router.callback_query(lambda c: c.data == "savemode_on")
-async def savemode_on(callback: CallbackQuery):
-    await callback.answer("✅ SAVE MODE включен! Используй /savemode on")
-
-
-@router.callback_query(lambda c: c.data == "savemode_off")
-async def savemode_off(callback: CallbackQuery):
-    await callback.answer("❌ SAVE MODE выключен! Используй /savemode off")
-
-
 @router.message(Command("help"))
 async def help_command(message: Message):
     await show_help(message)
-
-
-@router.message(Command("settings"))
-async def settings_command(message: Message):
-    await show_settings(message)
