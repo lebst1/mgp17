@@ -3,10 +3,14 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.filters import Command
 import logging
 
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+
 from src.config import settings
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.referral_repository import ReferralRepository
-from src.db.models import ReferralBonusStatus
+from src.db.models import ReferralBonusStatus, User
+from src.db.session import async_session
 from src.utils.sentry import SentryStub
 
 router = Router()
@@ -49,15 +53,24 @@ def _status_label(status_value: str) -> str:
     return mapping.get(status_value, status_value)
 
 
-async def build_referral_text(user) -> str:
+async def build_referral_text(user, session=None) -> str:
     stats = await ReferralRepository.get_referrer_stats(user.telegram_id)
     link = get_referral_link(user.referral_code) if user.referral_code else get_referral_link_legacy(user.telegram_id)
 
     own_bonus_info = ""
     try:
-        # Используем связи из модели вместо несуществующего метода
+        # Если переданная сессия активна, используем её для загрузки данных
+        if session:
+            # Убеждаемся, что данные загружены через сессию
+            if not hasattr(user, 'bonuses_as_referred') or not user.bonuses_as_referred:
+                # Пробуем загрузить через сессию
+                stmt = select(User).where(User.telegram_id == user.telegram_id).options(selectinload(User.bonuses_as_referred))
+                user_refreshed = await session.execute(stmt)
+                user = user_refreshed.scalar_one_or_none()
+                
+        # Теперь пробуем получить бонус
         own_bonus = None
-        if hasattr(user, 'bonuses_as_referred'):
+        if user and hasattr(user, 'bonuses_as_referred'):
             for bonus in user.bonuses_as_referred:
                 if bonus.referred_id == user.telegram_id:
                     own_bonus = bonus
@@ -117,23 +130,32 @@ def referral_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-async def _ensure_user(from_user):
-    user = await UserRepository.get_by_id(from_user.id)
-    if not user:
-        user, _ = await UserRepository.get_or_create(
-            telegram_id=from_user.id,
-            username=from_user.username,
-            first_name=from_user.first_name,
-            last_name=from_user.last_name,
-        )
-    return user
-
-
 @router.message(Command("ref"))
 async def ref_command(message: Message):
     try:
-        user = await _ensure_user(message.from_user)
-        text = await build_referral_text(user)
+        user_id = message.from_user.id
+        
+        # Используем сессию для загрузки пользователя с бонусами
+        async with async_session() as session:
+            stmt = select(User).where(User.telegram_id == user_id).options(selectinload(User.bonuses_as_referred))
+            result = await session.execute(stmt)
+            user = result.scalar_one_or_none()
+            
+            if not user:
+                # Если пользователь не найден, создаем нового
+                user, _ = await UserRepository.get_or_create(
+                    telegram_id=user_id,
+                    username=message.from_user.username,
+                    first_name=message.from_user.first_name,
+                    last_name=message.from_user.last_name,
+                )
+                # Обновляем пользователя с бонусами
+                stmt = select(User).where(User.telegram_id == user_id).options(selectinload(User.bonuses_as_referred))
+                result = await session.execute(stmt)
+                user = result.scalar_one()
+            
+            text = await build_referral_text(user, session)
+            
         await message.answer(text, reply_markup=referral_keyboard(), parse_mode="HTML")
     except Exception as e:
         SentryStub.capture_exception(e, context="ref_command", user_id=message.from_user.id)
@@ -143,8 +165,26 @@ async def ref_command(message: Message):
 @router.callback_query(F.data == "referral_menu")
 async def referral_menu_callback(callback: CallbackQuery):
     try:
-        user = await _ensure_user(callback.from_user)
-        text = await build_referral_text(user)
+        user_id = callback.from_user.id
+        
+        async with async_session() as session:
+            stmt = select(User).where(User.telegram_id == user_id).options(selectinload(User.bonuses_as_referred))
+            result = await session.execute(stmt)
+            user = result.scalar_one_or_none()
+            
+            if not user:
+                user, _ = await UserRepository.get_or_create(
+                    telegram_id=user_id,
+                    username=callback.from_user.username,
+                    first_name=callback.from_user.first_name,
+                    last_name=callback.from_user.last_name,
+                )
+                stmt = select(User).where(User.telegram_id == user_id).options(selectinload(User.bonuses_as_referred))
+                result = await session.execute(stmt)
+                user = result.scalar_one()
+            
+            text = await build_referral_text(user, session)
+            
         try:
             await callback.message.edit_text(text, reply_markup=referral_keyboard(), parse_mode="HTML")
         except Exception:
