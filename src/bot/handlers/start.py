@@ -131,6 +131,7 @@ async def start_command(message: Message):
             first_name=message.from_user.first_name,
             last_name=message.from_user.last_name,
             referral_code=referral_code,
+            bot=message.bot,  # 👈 ПЕРЕДАЕМ BOT
         )
     except Exception as e:
         SentryStub.capture_exception(e, context="start_command.get_or_create")
@@ -145,7 +146,7 @@ async def start_command(message: Message):
                 await message.answer(
                     "🔗 <b>Приглашение принято!</b>\n\n"
                     "Вы были приглашены реферальной ссылкой. "
-                    "🎁 Бонус за приглашение будет начислен <b>после первой успешной оплаты</b> подписки.",
+                    "🎁 Бонус за приглашение начислен <b>СРАЗУ</b>!",
                     parse_mode="HTML",
                 )
         except Exception as e:
@@ -232,6 +233,7 @@ async def back_to_start(callback: CallbackQuery):
             username=callback.from_user.username,
             first_name=callback.from_user.first_name,
             last_name=callback.from_user.last_name,
+            bot=callback.bot,  # 👈 ПЕРЕДАЕМ BOT
         )
 
     connections = await BusinessRepository.get_user_connections(callback.from_user.id)

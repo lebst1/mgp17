@@ -61,6 +61,7 @@ class UserRepository:
         first_name: str = None,
         last_name: str = None,
         referral_code: Optional[str] = None,
+        bot=None,  # 👈 ДОБАВЛЕН
     ) -> Tuple[User, bool]:
         """Создаёт или возвращает пользователя.
 
@@ -98,9 +99,9 @@ class UserRepository:
                             )
                             
                             if not existing_bonus:
-                                # ✅ Начисляем бонусы сразу за регистрацию
+                                # ✅ Начисляем бонусы сразу за регистрацию (передаем bot)
                                 await UserRepository._grant_referral_bonuses(
-                                    session, referrer_id, telegram_id
+                                    session, referrer_id, telegram_id, bot=bot
                                 )
                             
                             logger.info(
@@ -140,10 +141,10 @@ class UserRepository:
                 await session.commit()
                 await session.refresh(user)
 
-                # ✅ Начисляем бонусы сразу за регистрацию
+                # ✅ Начисляем бонусы сразу за регистрацию (передаем bot)
                 if referrer_id:
                     await UserRepository._grant_referral_bonuses(
-                        session, referrer_id, telegram_id
+                        session, referrer_id, telegram_id, bot=bot
                     )
 
                 logger.info(
@@ -160,9 +161,10 @@ class UserRepository:
             raise
 
     @staticmethod
-    async def _grant_referral_bonuses(session, referrer_id: int, referred_id: int) -> None:
+    async def _grant_referral_bonuses(session, referrer_id: int, referred_id: int, bot=None) -> None:
         """Начисляет реферальные бонусы СРАЗУ за регистрацию."""
         try:
+            # Проверяем, есть ли уже бонус
             existing = await session.scalar(
                 select(ReferralBonus).where(ReferralBonus.referred_id == referred_id)
             )
@@ -172,6 +174,7 @@ class UserRepository:
 
             now = datetime.utcnow()
             
+            # Создаем бонус со статусом RELEASED (сразу начисляем)
             bonus = ReferralBonus(
                 referrer_id=referrer_id,
                 referred_id=referred_id,
@@ -185,6 +188,7 @@ class UserRepository:
             session.add(bonus)
             await session.flush()
 
+            # Начисляем дни рефералу
             referred_user = await session.scalar(
                 select(User).where(User.telegram_id == referred_id)
             )
@@ -192,6 +196,7 @@ class UserRepository:
                 referred_user.extend_subscription(settings.REFERRAL_BONUS_REFERRED_DAYS)
                 referred_user.updated_at = now
 
+            # Начисляем дни рефереру
             referrer = await session.scalar(
                 select(User).where(User.telegram_id == referrer_id)
             )
@@ -199,7 +204,7 @@ class UserRepository:
                 referrer.extend_subscription(settings.REFERRAL_BONUS_REFERRER_DAYS)
                 referrer.updated_at = now
 
-            # ✅ ТРАНЗАКЦИИ
+            # Создаем транзакцию для реферала
             tx_referred = Transaction(
                 user_id=referred_id,
                 type=TransactionType.REFERRAL_BONUS,
@@ -213,6 +218,7 @@ class UserRepository:
             )
             session.add(tx_referred)
 
+            # Создаем транзакцию для реферера
             tx_referrer = Transaction(
                 user_id=referrer_id,
                 type=TransactionType.REFERRAL_BONUS,
@@ -228,31 +234,35 @@ class UserRepository:
 
             await session.commit()
 
-            # ✅ УВЕДОМЛЕНИЕ РЕФЕРАЛУ
-            try:
-                from src.bot import bot  # или передавай bot в функцию
-                await bot.send_message(
-                    chat_id=referred_id,
-                    text=f"🎁 <b>Реферальный бонус!</b>\n\n"
-                        f"Вы получили <b>+{settings.REFERRAL_BONUS_REFERRED_DAYS} день</b> подписки "
-                        f"за регистрацию по реферальной ссылке! 🚀",
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                logger.error(f"❌ Не удалось отправить уведомление рефералу {referred_id}: {e}")
+            # ✅ УВЕДОМЛЕНИЕ РЕФЕРАЛУ (если передан bot)
+            if bot:
+                try:
+                    await bot.send_message(
+                        chat_id=referred_id,
+                        text=f"🎁 <b>Реферальный бонус!</b>\n\n"
+                             f"Вы получили <b>+{settings.REFERRAL_BONUS_REFERRED_DAYS} день</b> подписки "
+                             f"за регистрацию по реферальной ссылке! 🚀\n\n"
+                             f"📅 Теперь подписка активна до: {referred_user.subscription_until.strftime('%d.%m.%Y') if referred_user and referred_user.subscription_until else '—'}",
+                        parse_mode="HTML"
+                    )
+                    logger.info(f"✅ Уведомление о реферальном бонусе отправлено рефералу {referred_id}")
+                except Exception as e:
+                    logger.error(f"❌ Не удалось отправить уведомление рефералу {referred_id}: {e}")
             
-            # ✅ УВЕДОМЛЕНИЕ РЕФЕРЕРУ
-            try:
-                from src.bot import bot
-                await bot.send_message(
-                    chat_id=referrer_id,
-                    text=f"🎁 <b>Реферальный бонус!</b>\n\n"
-                        f"Пользователь <code>{referred_id}</code> зарегистрировался по вашей ссылке!\n"
-                        f"Вы получили <b>+{settings.REFERRAL_BONUS_REFERRER_DAYS} дня</b> подписки! 🚀",
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                logger.error(f"❌ Не удалось отправить уведомление рефереру {referrer_id}: {e}")
+            # ✅ УВЕДОМЛЕНИЕ РЕФЕРЕРУ (если передан bot)
+            if bot:
+                try:
+                    await bot.send_message(
+                        chat_id=referrer_id,
+                        text=f"🎁 <b>Реферальный бонус!</b>\n\n"
+                             f"Пользователь <code>{referred_id}</code> зарегистрировался по вашей ссылке!\n"
+                             f"Вы получили <b>+{settings.REFERRAL_BONUS_REFERRER_DAYS} дня</b> подписки! 🚀\n\n"
+                             f"📅 Теперь подписка активна до: {referrer.subscription_until.strftime('%d.%m.%Y') if referrer and referrer.subscription_until else '—'}",
+                        parse_mode="HTML"
+                    )
+                    logger.info(f"✅ Уведомление о реферальном бонусе отправлено рефереру {referrer_id}")
+                except Exception as e:
+                    logger.error(f"❌ Не удалось отправить уведомление рефереру {referrer_id}: {e}")
 
             logger.info(
                 "🎁 Бонусы начислены за регистрацию: "
@@ -267,7 +277,7 @@ class UserRepository:
                 referrer_id=referrer_id, referred_id=referred_id,
             )
             raise
-        
+
     @staticmethod
     async def get_by_id(telegram_id: int) -> Optional[User]:
         try:
