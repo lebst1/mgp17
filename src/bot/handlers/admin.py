@@ -1359,6 +1359,13 @@ async def delete_user(callback: CallbackQuery):
                 await session.delete(msg)
                 deleted_messages += 1
             
+            # ❌ ЗАКОММЕНТИРУЙ ЭТОТ БЛОК:
+            # todos = await session.scalars(
+            #     select(Todo).where(Todo.user_id == user_id)
+            # )
+            # for todo in todos:
+            #     await session.delete(todo)
+            
             # 2. Удаляем реферальные бонусы
             bonuses = await session.scalars(
                 select(ReferralBonus).where(
@@ -1387,7 +1394,6 @@ async def delete_user(callback: CallbackQuery):
             
             await session.commit()
         
-        # ✅ Сообщение об успехе
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Назад к списку", callback_data="admin_users")]
         ])
@@ -1402,7 +1408,6 @@ async def delete_user(callback: CallbackQuery):
         
     except Exception as e:
         logger.error(f"❌ Ошибка удаления пользователя {user_id}: {e}")
-        # ✅ ОБРЕЗАЕМ СООБЩЕНИЕ ОБ ОШИБКЕ
         error_msg = str(e)
         if len(error_msg) > 200:
             error_msg = error_msg[:200] + "..."
