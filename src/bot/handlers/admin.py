@@ -12,7 +12,7 @@ from src.db.repositories.payment_repository import PaymentRepository
 from src.db.session import async_session, cleanup_old_data
 from src.config import settings
 from sqlalchemy import select, func, or_, and_, desc, case
-from src.db.models import User, SavedMessage, BusinessConnection, Payment
+from src.db.models import User, SavedMessage, BusinessConnection, Payment, ReferralBonus
 import os
 import logging
 from datetime import datetime, timedelta
@@ -194,11 +194,6 @@ async def admin_stats(callback: CallbackQuery):
             if os.path.isfile(f_path):
                 media_dir_size += os.path.getsize(f_path)
     
-    # ✅ Исправляем обращение к ключам pay_stats
-    total_payments = pay_stats.get('total_payments', 0)
-    paid_payments = pay_stats.get('paid_payments', 0)  # 👈 было 'succeeded_payments'
-    total_amount = pay_stats.get('total_amount', 0)
-    
     text = f"""
 📊 <b>Статистика SafeSaverX</b>
 
@@ -219,9 +214,9 @@ async def admin_stats(callback: CallbackQuery):
 🎁 Всего рефералов: {sub_stats.get('total_referrals', 0)}
 
 <b>Платежи:</b>
-💳 Всего платежей: {total_payments}
-✅ Успешных: {paid_payments}
-💰 Сумма: {total_amount:.0f}₽
+💳 Всего платежей: {pay_stats.get('total_payments', 0)}
+✅ Успешных: {pay_stats.get('paid_payments', 0)}
+💰 Сумма: {pay_stats.get('total_amount', 0):.0f}₽
 ━━━━━━━━━━━━━━━━━━━━━
 
 🔄 <i>Обновлено: {format_datetime(datetime.now())}</i>
@@ -236,6 +231,7 @@ async def admin_stats(callback: CallbackQuery):
     
     await safe_edit_message(callback.message, text, keyboard)
     await callback.answer()
+
 
 # ✅ РАССЫЛКА
 @router.callback_query(lambda c: c.data == "admin_broadcast")
@@ -1170,6 +1166,96 @@ async def admin_user_chat(callback: CallbackQuery):
     await callback.answer()
 
 
+@router.callback_query(lambda c: c.data.startswith("admin_user_delete_"))
+async def admin_user_delete(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    user_id = int(callback.data.split("_")[-1])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"admin_user_delete_confirm_{user_id}"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="admin_users"),
+        ]
+    ])
+    
+    await safe_edit_message(
+        callback.message,
+        f"⚠️ <b>Удалить пользователя?</b>\n\n"
+        f"ID: <code>{user_id}</code>\n\n"
+        f"Будут удалены ВСЕ данные пользователя:\n"
+        f"• Сообщения\n"
+        f"• Медиа-файлы\n"
+        f"• Настройки\n"
+        f"• Реферальные бонусы\n\n"
+        f"Это действие НЕОБРАТИМО!",
+        keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin_user_delete_confirm_"))
+async def admin_user_delete_confirm(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    user_id = int(callback.data.split("_")[-1])
+    
+    try:
+        async with async_session() as session:
+            messages = await session.scalars(
+                select(SavedMessage).where(SavedMessage.user_id == user_id)
+            )
+            for msg in messages:
+                if msg.media_path and os.path.exists(msg.media_path):
+                    try:
+                        os.remove(msg.media_path)
+                    except:
+                        pass
+                await session.delete(msg)
+            
+            bonuses = await session.scalars(
+                select(ReferralBonus).where(
+                    or_(
+                        ReferralBonus.referrer_id == user_id,
+                        ReferralBonus.referred_id == user_id
+                    )
+                )
+            )
+            for bonus in bonuses:
+                await session.delete(bonus)
+            
+            connections = await session.scalars(
+                select(BusinessConnection).where(BusinessConnection.user_id == user_id)
+            )
+            for conn in connections:
+                await session.delete(conn)
+            
+            user = await session.scalar(
+                select(User).where(User.telegram_id == user_id)
+            )
+            if user:
+                await session.delete(user)
+            
+            await session.commit()
+        
+        await safe_edit_message(
+            callback.message,
+            f"✅ Пользователь <code>{user_id}</code> полностью удален!",
+            InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_users")]
+            ]),
+        )
+        await callback.answer("✅ Пользователь удален!", show_alert=True)
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка удаления пользователя {user_id}: {e}")
+        await callback.answer("❌ Ошибка при удалении", show_alert=True)
+
+
 async def show_users_list(target, page: int = 1, search_query: str = None):
     """Отображает список пользователей с пагинацией и кнопками перехода в чат."""
     USERS_PER_PAGE = 15
@@ -1203,17 +1289,14 @@ async def show_users_list(target, page: int = 1, search_query: str = None):
         return
     
     text = f"📋 <b>Список пользователей</b> (стр. {page}/{total_pages}, всего: {total_users})\n\n"
-    
     keyboard_buttons = []
     
     for user in users:
         sub_status = "✅" if user.has_active_subscription() else "❌"
         sub_until = user.subscription_until.strftime("%d.%m") if user.subscription_until else "—"
-        
         name = user.first_name or user.username or str(user.telegram_id)
         if len(name) > 20:
             name = name[:17] + "..."
-        
         status_icon = "🟢" if user.is_active else "🔴"
         msg_count = user.messages_saved or 0
         
@@ -1221,7 +1304,6 @@ async def show_users_list(target, page: int = 1, search_query: str = None):
         if user.username:
             user_line += f" <b>@{user.username}</b>"
         user_line += f" {name} | {sub_status} {sub_until} | 📊{msg_count}"
-        
         text += user_line + "\n"
         
         keyboard_buttons.append([
@@ -1230,20 +1312,20 @@ async def show_users_list(target, page: int = 1, search_query: str = None):
                 callback_data=f"admin_user_chat_{user.telegram_id}"
             )
         ])
+        
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text=f"🗑️ Удалить",
+                callback_data=f"admin_user_delete_{user.telegram_id}"
+            )
+        ])
     
     nav_buttons = []
     if page > 1:
-        nav_buttons.append(
-            InlineKeyboardButton(text="⬅️", callback_data=f"admin_users_page_{page-1}")
-        )
-    nav_buttons.append(
-        InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="admin_users_current")
-    )
+        nav_buttons.append(InlineKeyboardButton(text="⬅️", callback_data=f"admin_users_page_{page-1}"))
+    nav_buttons.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="admin_users_current"))
     if page < total_pages:
-        nav_buttons.append(
-            InlineKeyboardButton(text="➡️", callback_data=f"admin_users_page_{page+1}")
-        )
-    
+        nav_buttons.append(InlineKeyboardButton(text="➡️", callback_data=f"admin_users_page_{page+1}"))
     if nav_buttons:
         keyboard_buttons.append(nav_buttons)
     
@@ -1253,7 +1335,6 @@ async def show_users_list(target, page: int = 1, search_query: str = None):
     ])
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-    
     await safe_edit_message(target, text, keyboard)
 
 
@@ -1525,9 +1606,24 @@ async def admin_grant_days(callback: CallbackQuery, state: FSMContext):
 
     user = await UserRepository.extend_subscription(user_id, days)
     until = format_datetime(user.subscription_until) if user else "—"
+    
+    # ✅ УВЕДОМЛЕНИЕ ПОЛЬЗОВАТЕЛЮ
+    try:
+        await callback.bot.send_message(
+            chat_id=user_id,
+            text=f"🎉 <b>Подписка активирована!</b>\n\n"
+                 f"Вам выдана подписка на <b>{days} дней</b>.\n"
+                 f"Действует до: <b>{until}</b>\n\n"
+                 f"Теперь вам доступны все функции бота! 🚀",
+            parse_mode="HTML"
+        )
+        logger.info(f"✅ Уведомление о подписке отправлено пользователю {user_id}")
+    except Exception as e:
+        logger.error(f"❌ Не удалось отправить уведомление {user_id}: {e}")
+    
     await safe_edit_message(
         callback.message,
-        f"✅ Подписка выдана!\n\n👤 ID: <code>{user_id}</code>\n📅 До: {until}\n➕ Дней: {days}",
+        f"✅ Подписка выдана!\n\n👤 ID: <code>{user_id}</code>\n📅 До: {until}\n➕ Дней: {days}\n📨 Уведомление отправлено!",
         InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
         ]),
@@ -1626,7 +1722,7 @@ async def admin_referrals(callback: CallbackQuery):
     text = f"""
 🎁 <b>Реферальная статистика</b>
 
-👥 Всего рефералов: {stats['total_referrals']}
+👥 Всего рефералов: {stats.get('total_referrals', 0)}
 
 <b>Топ рефереров:</b>
 """
@@ -1661,9 +1757,9 @@ async def admin_payments(callback: CallbackQuery):
     text = f"""
 💳 <b>Платежи</b>
 
-Всего: {pay_stats['total_payments']}
-Успешных: {pay_stats['succeeded_payments']}
-Сумма: {pay_stats['total_amount']:.0f}₽
+Всего: {pay_stats.get('total_payments', 0)}
+Успешных: {pay_stats.get('paid_payments', 0)}
+Сумма: {pay_stats.get('total_amount', 0):.0f}₽
 
 <b>Последние:</b>
 """

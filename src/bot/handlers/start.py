@@ -5,6 +5,7 @@ import os
 import logging
 import re
 
+from aiogram.types import InlineKeyboardButton, CopyTextButton
 from src.config import settings
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.business_repository import BusinessRepository
@@ -82,14 +83,18 @@ async def get_main_menu(user, has_business):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="👤 Профиль", callback_data="profile_menu"),
-            InlineKeyboardButton(text="🎁 Рефералы", callback_data="referral_menu"),
+            InlineKeyboardButton(text="🎁 Рефералы (бонус за регистрацию)", callback_data="referral_menu"),
         ],
         [
             InlineKeyboardButton(text="💳 Подписка", callback_data="subscribe_menu"),
             InlineKeyboardButton(text="📝 SAVE MODE", callback_data="savemode"),
         ],
         [
-            InlineKeyboardButton(text="📋 Скопировать юзернейм", callback_data="copy_username"),
+            InlineKeyboardButton(
+                text="📋 Скопировать юзернейм",
+                callback_data="copy_username",
+                copy_text=CopyTextButton(text=f"@{settings.BOT_USERNAME.lstrip('@')}")
+),
         ],
         [
             InlineKeyboardButton(text="❓ Описание команд", callback_data="show_help"),
@@ -159,13 +164,11 @@ async def start_command(message: Message):
 
 @router.callback_query(lambda c: c.data == "copy_username")
 async def copy_username(callback: CallbackQuery):
-    # Копируем юзернейм бота из настроек
-    bot_username = settings.BOT_USERNAME or "SafeSaverX_bot"
+    bot_username = settings.BOT_USERNAME or "laosllebot"
     await callback.answer(
         text=f"✅ @{bot_username.lstrip('@')} скопирован!\n\nОткрой Настройки → Редактирование профиля → Автоматизация действий и вставь юзернейм.",
         show_alert=True,
     )
-
 
 @router.callback_query(lambda c: c.data == "edit_profile")
 async def edit_profile(callback: CallbackQuery):
