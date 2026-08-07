@@ -194,6 +194,11 @@ async def admin_stats(callback: CallbackQuery):
             if os.path.isfile(f_path):
                 media_dir_size += os.path.getsize(f_path)
     
+    # ✅ Исправляем обращение к ключам pay_stats
+    total_payments = pay_stats.get('total_payments', 0)
+    paid_payments = pay_stats.get('paid_payments', 0)  # 👈 было 'succeeded_payments'
+    total_amount = pay_stats.get('total_amount', 0)
+    
     text = f"""
 📊 <b>Статистика SafeSaverX</b>
 
@@ -208,15 +213,15 @@ async def admin_stats(callback: CallbackQuery):
 ━━━━━━━━━━━━━━━━━━━━━
 
 <b>Подписки:</b>
-👤 Всего пользователей: {sub_stats['total_users']}
-✅ Активных подписок: {sub_stats['active_subscriptions']}
-❌ Истекших подписок: {sub_stats['expired_subscriptions']}
-🎁 Всего рефералов: {sub_stats['total_referrals']}
+👤 Всего пользователей: {sub_stats.get('total_users', 0)}
+✅ Активных подписок: {sub_stats.get('active_subscriptions', 0)}
+❌ Истекших подписок: {sub_stats.get('expired_subscriptions', 0)}
+🎁 Всего рефералов: {sub_stats.get('total_referrals', 0)}
 
 <b>Платежи:</b>
-💳 Всего платежей: {pay_stats['total_payments']}
-✅ Успешных: {pay_stats['succeeded_payments']}
-💰 Сумма: {pay_stats['total_amount']:.0f}₽
+💳 Всего платежей: {total_payments}
+✅ Успешных: {paid_payments}
+💰 Сумма: {total_amount:.0f}₽
 ━━━━━━━━━━━━━━━━━━━━━
 
 🔄 <i>Обновлено: {format_datetime(datetime.now())}</i>
@@ -231,7 +236,6 @@ async def admin_stats(callback: CallbackQuery):
     
     await safe_edit_message(callback.message, text, keyboard)
     await callback.answer()
-
 
 # ✅ РАССЫЛКА
 @router.callback_query(lambda c: c.data == "admin_broadcast")
