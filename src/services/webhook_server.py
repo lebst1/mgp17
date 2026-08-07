@@ -3,7 +3,7 @@ import logging
 from typing import Optional
 
 from src.config import settings
-from src.services.yookassa_service import YooKassaService
+from src.services.robokassa_service import YooKassaService
 from src.services.webhook_security import (
     YooKassaWebhookSignature,
     StripeWebhookSignature,
