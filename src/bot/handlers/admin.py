@@ -1300,20 +1300,19 @@ async def admin_user_delete(callback: CallbackQuery):
         ]
     ])
     
-    await callback.message.edit_text(
-        f"⚠️ <b>Удалить пользователя?</b>\n\n"
-        f"ID: <code>{user_id}</code>\n\n"
-        f"Будут удалены ВСЕ данные пользователя:\n"
-        f"• Сообщения\n"
-        f"• Медиа-файлы\n"
-        f"• Настройки\n"
-        f"• Реферальные бонусы\n\n"
-        f"Это действие НЕОБРАТИМО!",
-        reply_markup=keyboard,
-        parse_mode="HTML"
-    )
+    text = f"⚠️ <b>Удалить пользователя?</b>\n\nID: <code>{user_id}</code>\n\nБудут удалены ВСЕ данные пользователя:\n• Сообщения\n• Медиа-файлы\n• Настройки\n• Реферальные бонусы\n\nЭто действие НЕОБРАТИМО!"
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception as e:
+        if "message is not modified" in str(e):
+            # Если сообщение уже такое же — просто отвечаем
+            await callback.answer("⚠️ Вы уже на этом экране")
+        else:
+            # Если другая ошибка — пробуем отправить новое сообщение
+            await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
-
+    
 @router.callback_query(F.data.startswith("admin_user_delete_confirm_"))
 async def admin_user_delete_confirm(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
