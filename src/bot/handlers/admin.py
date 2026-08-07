@@ -60,7 +60,7 @@ class AdminStates(StatesGroup):
     waiting_for_sub_remove = State()
     waiting_for_sub_grant_user = State()
     waiting_for_sub_revoke_user = State()
-    waiting_for_user_search = State()  # 👈 НОВОЕ ДЛЯ ПОИСКА ПОЛЬЗОВАТЕЛЕЙ
+    waiting_for_user_search = State()
 
 
 # ✅ ПРОВЕРКА АДМИНА (только владелец)
@@ -365,12 +365,16 @@ async def process_search(message: Message, state: FSMContext):
             )
         )
     
+    user_info = f"{user.first_name or 'Не указано'}"
+    if user.username:
+        user_info += f" (@{user.username})"
+    
     text = f"""
 👤 <b>Найден пользователь</b>
 
 ━━━━━━━━━━━━━━━━━━━━━
 🆔 ID: <code>{user.telegram_id}</code>
-👤 Имя: {user.first_name or 'Не указано'}
+👤 Имя: {user_info}
 📛 Юзернейм: @{user.username or 'Нет'}
 ✅ Активен: {'✅ Да' if user.is_active else '❌ Нет'}
 📝 Сообщений: {messages_count or 0}
@@ -506,8 +510,7 @@ async def show_chats_list(target, user_id: int, page: int = 1):
         await target.answer("📭 Нет сохранённых чатов у этого пользователя.")
         return
     
-    # Формируем информацию о пользователе
-    user_info = f"👤 {user.first_name or user.username or 'Пользователь'}"
+    user_info = f"{user.first_name or user.username or 'Пользователь'}"
     if user.username:
         user_info += f" (@{user.username})"
     
@@ -715,7 +718,6 @@ async def admin_chat_more(callback: CallbackQuery):
         time_str = format_datetime(msg.saved_at)
         name = msg.from_username or msg.from_first_name or 'Аноним'
         
-        # Добавляем @username если есть
         if msg.from_username:
             name = f"{name} (@{msg.from_username})"
         
@@ -826,7 +828,6 @@ async def show_chat_messages(target, user_id: int, chat_id: int, filter_type: st
     elif filter_type == "media":
         filter_text = " 🖼️ (только медиа)"
     
-    # Информация о пользователе с username
     user_info = f"{user.first_name or user.username or 'Пользователь'}"
     if user.username:
         user_info += f" (@{user.username})"
@@ -850,7 +851,6 @@ async def show_chat_messages(target, user_id: int, chat_id: int, filter_type: st
         time_str = format_datetime(msg.saved_at)
         name = msg.from_username or msg.from_first_name or 'Аноним'
         
-        # Добавляем @username если есть
         if msg.from_username:
             name = f"{name} (@{msg.from_username})"
         
@@ -892,7 +892,6 @@ async def show_chat_messages(target, user_id: int, chat_id: int, filter_type: st
         
         chat_text += "\n➖➖➖➖➖➖➖➖➖➖\n"
     
-    # Отправляем медиа отдельно
     if media_items:
         await target.answer("🖼️ <b>Медиа в этом чате:</b>", parse_mode="HTML")
         for msg in media_items[:10]:
@@ -922,7 +921,6 @@ async def show_chat_messages(target, user_id: int, chat_id: int, filter_type: st
             except Exception as e:
                 logger.error(f"Ошибка отправки медиа {msg.id}: {e}")
     
-    # Кнопки навигации
     nav_buttons = []
     if page > 1:
         nav_buttons.append(
@@ -1168,45 +1166,11 @@ async def admin_user_chat(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(lambda c: c.data.startswith("admin_user_ban_"))
-async def admin_user_ban_from_list(callback: CallbackQuery):
-    if not await is_admin(callback.from_user.id):
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    user_id = int(callback.data.split("_")[-1])
-    user = await UserRepository.update_settings(user_id, is_active=False)
-    
-    if user:
-        await callback.answer(f"✅ Пользователь {user_id} заблокирован!", show_alert=True)
-        # Обновляем список
-        await show_users_list(callback.message, 1)
-    else:
-        await callback.answer(f"❌ Пользователь {user_id} не найден!", show_alert=True)
-
-
-@router.callback_query(lambda c: c.data.startswith("admin_user_unban_"))
-async def admin_user_unban_from_list(callback: CallbackQuery):
-    if not await is_admin(callback.from_user.id):
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    user_id = int(callback.data.split("_")[-1])
-    user = await UserRepository.update_settings(user_id, is_active=True)
-    
-    if user:
-        await callback.answer(f"✅ Пользователь {user_id} разблокирован!", show_alert=True)
-        await show_users_list(callback.message, 1)
-    else:
-        await callback.answer(f"❌ Пользователь {user_id} не найден!", show_alert=True)
-
-
 async def show_users_list(target, page: int = 1, search_query: str = None):
-    """Отображает список пользователей с пагинацией и кнопками."""
+    """Отображает список пользователей с пагинацией и кнопками перехода в чат."""
     USERS_PER_PAGE = 15
     
     async with async_session() as session:
-        # Базовый запрос
         stmt = select(User)
         if search_query:
             stmt = stmt.where(
@@ -1217,11 +1181,9 @@ async def show_users_list(target, page: int = 1, search_query: str = None):
                 )
             )
         
-        # Считаем общее количество
         total_users = await session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
         total_pages = (total_users + USERS_PER_PAGE - 1) // USERS_PER_PAGE if total_users > 0 else 1
         
-        # Пагинация
         offset = (page - 1) * USERS_PER_PAGE
         users = await session.scalars(
             stmt.order_by(User.created_at.desc()).offset(offset).limit(USERS_PER_PAGE)
@@ -1241,54 +1203,30 @@ async def show_users_list(target, page: int = 1, search_query: str = None):
     keyboard_buttons = []
     
     for user in users:
-        # Определяем статус подписки
         sub_status = "✅" if user.has_active_subscription() else "❌"
         sub_until = user.subscription_until.strftime("%d.%m") if user.subscription_until else "—"
         
-        # Формируем имя пользователя
         name = user.first_name or user.username or str(user.telegram_id)
         if len(name) > 20:
             name = name[:17] + "..."
         
-        # Статус активности
         status_icon = "🟢" if user.is_active else "🔴"
-        
-        # Количество сообщений
         msg_count = user.messages_saved or 0
         
-        # Формируем строку с username
         user_line = f"{status_icon} <code>{user.telegram_id}</code>"
         if user.username:
-            user_line += f" @{user.username}"
+            user_line += f" <b>@{user.username}</b>"
         user_line += f" {name} | {sub_status} {sub_until} | 📊{msg_count}"
         
         text += user_line + "\n"
         
-        # Кнопки для пользователя
         keyboard_buttons.append([
             InlineKeyboardButton(
-                text=f"💬 {name[:12]}",
+                text=f"💬 {name[:15]}",
                 callback_data=f"admin_user_chat_{user.telegram_id}"
             )
         ])
-        
-        # Кнопки бана/разбана
-        if user.is_active:
-            keyboard_buttons.append([
-                InlineKeyboardButton(
-                    text="🚫 Бан",
-                    callback_data=f"admin_user_ban_{user.telegram_id}"
-                )
-            ])
-        else:
-            keyboard_buttons.append([
-                InlineKeyboardButton(
-                    text="✅ Разбан",
-                    callback_data=f"admin_user_unban_{user.telegram_id}"
-                )
-            ])
     
-    # Навигация
     nav_buttons = []
     if page > 1:
         nav_buttons.append(

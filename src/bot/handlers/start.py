@@ -88,22 +88,25 @@ async def get_main_menu(user, has_business):
 """
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="👤 Профиль", callback_data="profile_menu"),
-            InlineKeyboardButton(text="🎁 Рефералы", callback_data="referral_menu"),
-        ],
-        [
-            InlineKeyboardButton(text="💳 Подписка", callback_data="subscribe_menu"),
-            InlineKeyboardButton(text="⚙ Настройки", callback_data="settings"),
-        ],
-        [
-            InlineKeyboardButton(text="📋 Скопировать юзернейм", callback_data="copy_username"),
-        ],
-        [
-            InlineKeyboardButton(text="❓ Описание команд", callback_data="show_help"),
-            InlineKeyboardButton(text="⭐ Важное", callback_data="important"),
-        ],
-    ])
+    [
+        InlineKeyboardButton(text="👤 Профиль", callback_data="profile_menu"),
+        InlineKeyboardButton(text="🎁 Рефералы", callback_data="referral_menu"),
+    ],
+    [
+        InlineKeyboardButton(text="💳 Подписка", callback_data="subscribe_menu"),
+        InlineKeyboardButton(text="⚙ Настройки", callback_data="settings"),
+    ],
+    [
+        InlineKeyboardButton(text="📝 SAVE MODE", callback_data="savemode"),  # 👈 Новая кнопка
+    ],
+    [
+        InlineKeyboardButton(text="📋 Скопировать юзернейм", callback_data="copy_username"),
+    ],
+    [
+        InlineKeyboardButton(text="❓ Описание команд", callback_data="show_help"),
+        InlineKeyboardButton(text="⭐ Важное", callback_data="important"),
+    ],
+])
 
     return text, keyboard
 

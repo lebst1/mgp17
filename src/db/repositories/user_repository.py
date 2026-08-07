@@ -7,7 +7,7 @@ import string
 from sqlalchemy import select, func
 
 from src.config import settings
-from src.db.models import User, ReferralBonus, ReferralBonusStatus
+from src.db.models import User, ReferralBonus, ReferralBonusStatus, Transaction, TransactionType, TransactionStatus
 from src.db.session import async_session
 from src.utils.sentry import SentryStub
 
@@ -64,9 +64,9 @@ class UserRepository:
     ) -> Tuple[User, bool]:
         """Создаёт или возвращает пользователя.
 
-        Если referral_code передан — ТОЛЬКО привязывает referred_by и создаёт
-        ReferralBonus в статусе HELD. Никаких бонусов за регистрацию не начисляет!
-        Бонус выдаётся строго после ПЕРВОЙ успешной оплаты (см. PaymentRepository.mark_as_paid).
+        Если referral_code передан — начисляет бонусы СРАЗУ за регистрацию:
+        - Реферал получает REFERRAL_BONUS_REFERRED_DAYS дней
+        - Реферер получает REFERRAL_BONUS_REFERRER_DAYS дней
         """
         try:
             async with async_session() as session:
@@ -91,12 +91,22 @@ class UserRepository:
                         if referrer_id and referrer_id != telegram_id:
                             user.referred_by = referrer_id
                             changed = True
-                            from src.db.repositories.referral_repository import ReferralRepository as _RR
-                            bonus = await _RR.bind_referrer(telegram_id, referral_code)
+                            
+                            # ✅ Проверяем, есть ли уже бонус
+                            existing_bonus = await session.scalar(
+                                select(ReferralBonus).where(ReferralBonus.referred_id == telegram_id)
+                            )
+                            
+                            if not existing_bonus:
+                                # ✅ Начисляем бонусы сразу за регистрацию
+                                await UserRepository._grant_referral_bonuses(
+                                    session, referrer_id, telegram_id
+                                )
+                            
                             logger.info(
                                 "🔗 Привязка реферера при повторном визите: "
-                                "user=%s -> referrer=%s bonus_id=%s",
-                                telegram_id, referrer_id, bonus.id if bonus else None,
+                                "user=%s -> referrer=%s",
+                                telegram_id, referrer_id
                             )
                     if changed:
                         user.updated_at = datetime.utcnow()
@@ -130,22 +140,110 @@ class UserRepository:
                 await session.commit()
                 await session.refresh(user)
 
-                bonus_id = None
+                # ✅ Начисляем бонусы сразу за регистрацию
                 if referrer_id:
-                    from src.db.repositories.referral_repository import ReferralRepository as _RR
-                    bonus = await _RR.bind_referrer(telegram_id, referral_code)
-                    bonus_id = bonus.id if bonus else None
+                    await UserRepository._grant_referral_bonuses(
+                        session, referrer_id, telegram_id
+                    )
 
                 logger.info(
-                    "✅ Новый пользователь %s, trial %s дн. ref_code=%s referred_by=%s bonus_held=%s",
+                    "✅ Новый пользователь %s, trial %s дн. ref_code=%s referred_by=%s",
                     telegram_id, settings.TRIAL_DAYS,
-                    user.referral_code, referrer_id, bonus_id is not None,
+                    user.referral_code, referrer_id,
                 )
                 return user, True
         except Exception as e:
             SentryStub.capture_exception(
                 e, context="UserRepository.get_or_create",
                 telegram_id=telegram_id, referral_code=referral_code,
+            )
+            raise
+
+    @staticmethod
+    async def _grant_referral_bonuses(session, referrer_id: int, referred_id: int) -> None:
+        """Начисляет реферальные бонусы СРАЗУ за регистрацию."""
+        try:
+            # Проверяем, есть ли уже бонус
+            existing = await session.scalar(
+                select(ReferralBonus).where(ReferralBonus.referred_id == referred_id)
+            )
+            if existing:
+                logger.info(f"Бонус для {referred_id} уже существует, пропускаем")
+                return
+
+            now = datetime.utcnow()
+            
+            # Создаем бонус со статусом RELEASED (сразу начисляем)
+            bonus = ReferralBonus(
+                referrer_id=referrer_id,
+                referred_id=referred_id,
+                status=ReferralBonusStatus.RELEASED,
+                referrer_days=settings.REFERRAL_BONUS_REFERRER_DAYS,
+                referred_days=settings.REFERRAL_BONUS_REFERRED_DAYS,
+                released_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(bonus)
+            await session.flush()
+
+            # Начисляем дни рефералу
+            referred_user = await session.scalar(
+                select(User).where(User.telegram_id == referred_id)
+            )
+            if referred_user:
+                referred_user.extend_subscription(settings.REFERRAL_BONUS_REFERRED_DAYS)
+                referred_user.updated_at = now
+
+            # Начисляем дни рефереру
+            referrer = await session.scalar(
+                select(User).where(User.telegram_id == referrer_id)
+            )
+            if referrer:
+                referrer.extend_subscription(settings.REFERRAL_BONUS_REFERRER_DAYS)
+                referrer.updated_at = now
+
+            # Создаем транзакцию для реферала
+            tx_referred = Transaction(
+                user_id=referred_id,
+                type=TransactionType.REFERRAL_BONUS,
+                status=TransactionStatus.COMPLETED,
+                days_credited=settings.REFERRAL_BONUS_REFERRED_DAYS,
+                referral_bonus_id=bonus.id,
+                description=f"Реферальный бонус за регистрацию: +{settings.REFERRAL_BONUS_REFERRED_DAYS} дн.",
+                completed_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(tx_referred)
+
+            # Создаем транзакцию для реферера
+            tx_referrer = Transaction(
+                user_id=referrer_id,
+                type=TransactionType.REFERRAL_BONUS,
+                status=TransactionStatus.COMPLETED,
+                days_credited=settings.REFERRAL_BONUS_REFERRER_DAYS,
+                referral_bonus_id=bonus.id,
+                description=f"Реферальный бонус за приглашение {referred_id}: +{settings.REFERRAL_BONUS_REFERRER_DAYS} дн.",
+                completed_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(tx_referrer)
+
+            await session.commit()
+
+            logger.info(
+                "🎁 Бонусы начислены за регистрацию: "
+                "реферал +%s дн., реферер +%s дн.",
+                settings.REFERRAL_BONUS_REFERRED_DAYS,
+                settings.REFERRAL_BONUS_REFERRER_DAYS,
+            )
+
+        except Exception as e:
+            SentryStub.capture_exception(
+                e, context="UserRepository._grant_referral_bonuses",
+                referrer_id=referrer_id, referred_id=referred_id,
             )
             raise
 
@@ -240,17 +338,25 @@ class UserRepository:
     async def process_referral(new_user_id: int, referrer_id: int) -> bool:
         """DEPRECATED: оставлен для обратной совместимости.
 
-        В новой логике начисление бонуса происходит только после первой оплаты.
-        Этот метод сейчас ТОЛЬКО привязывает referred_by (без начисления дней).
+        В новой логике начисление бонуса происходит сразу при регистрации.
         """
         try:
             if new_user_id == referrer_id:
                 return False
-            from src.db.repositories.referral_repository import ReferralRepository as _RR
-            bonus = await _RR.bind_referrer(
-                new_user_id, str(referrer_id),
-            )
-            return bonus is not None
+            
+            async with async_session() as session:
+                # Проверяем, есть ли уже бонус
+                existing = await session.scalar(
+                    select(ReferralBonus).where(ReferralBonus.referred_id == new_user_id)
+                )
+                if existing:
+                    return True
+                
+                # Начисляем бонусы
+                await UserRepository._grant_referral_bonuses(
+                    session, referrer_id, new_user_id
+                )
+                return True
         except Exception as e:
             SentryStub.capture_exception(
                 e, context="UserRepository.process_referral",
@@ -285,9 +391,9 @@ class UserRepository:
                 "total_users": total,
                 "active_subscriptions": active,
                 "expired_subscriptions": expired,
-                "total_referral_bonuses": int(total_referrals),
-                "released_referral_bonuses": int(released_referrals),
-                "held_referral_bonuses": int(held_referrals),
+                "total_referrals": total_referrals,
+                "released_referrals": released_referrals,
+                "held_referrals": held_referrals,
             }
         except Exception as e:
             SentryStub.capture_exception(e, context="UserRepository.get_subscription_stats")

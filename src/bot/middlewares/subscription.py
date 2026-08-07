@@ -9,7 +9,8 @@ from src.db.repositories.user_repository import UserRepository
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_COMMANDS = {"start", "profile", "buy", "ref", "subscribe", "admin", "cancel", "savemode"}  # 👈 ДОБАВИЛИ savemode
+# ✅ Добавили savemode в разрешенные команды (чтобы меню открывалось)
+ALLOWED_COMMANDS = {"start", "profile", "buy", "ref", "subscribe", "admin", "cancel", "savemode"}
 
 ALLOWED_CALLBACK_PREFIXES = (
     "profile",
@@ -22,7 +23,7 @@ ALLOWED_CALLBACK_PREFIXES = (
     "edit_profile",
     "show_help",
     "important",
-    "savemode",  # 👈 ДОБАВИЛИ
+    "savemode",  # 👈 Добавили
 )
 
 
@@ -68,7 +69,7 @@ class SubscriptionMiddleware(BaseMiddleware):
             "/profile — личный кабинет\n"
             "/buy — купить подписку\n"
             "/ref — реферальная система\n"
-            "/savemode — включить/выключить SAVE MODE"
+            "/savemode — настройки SAVE MODE"
         )
 
         if isinstance(event, Message):
