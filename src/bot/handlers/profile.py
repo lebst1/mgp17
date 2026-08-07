@@ -18,6 +18,22 @@ async def build_profile_text(user) -> str:
     sub = user.get_subscription_info()
     until = _format_date(sub["subscription_until"])
 
+    # Безопасное получение количества рефералов
+    try:
+        referrals_count = len(user.direct_referrals) if user.direct_referrals else 0
+    except:
+        referrals_count = 0
+    
+    # Безопасное получение заработанных дней
+    referral_days_earned = 0
+    try:
+        if user.bonuses_as_referrer:
+            for bonus in user.bonuses_as_referrer:
+                if bonus.status.value == "released":
+                    referral_days_earned += bonus.referrer_days
+    except:
+        referral_days_earned = 0
+
     return f"""
 👤 <b>Личный кабинет</b>
 
@@ -31,8 +47,8 @@ async def build_profile_text(user) -> str:
 ▸ Осталось дней: {sub['days_left']}
 
 🎁 <b>Рефералы</b>
-▸ Приглашено: {user.referrals_count or 0}
-▸ Заработано дней: {user.referral_days_earned or 0}
+▸ Приглашено: {referrals_count}
+▸ Заработано дней: {referral_days_earned}
 """
 
 
