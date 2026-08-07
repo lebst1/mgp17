@@ -1298,11 +1298,13 @@ async def admin_user_delete(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
+    logger.info(f"🔍 admin_user_delete: {callback.data}")  # 👈 ЛОГ
+    
     user_id = int(callback.data.split("_")[-1])
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Да, удалить навсегда", callback_data=f"admin_user_delete_final_{user_id}"),
+            InlineKeyboardButton(text="✅ Да, удалить навсегда", callback_data=f"delete_user_{user_id}"),
             InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin_user_menu_{user_id}"),
         ]
     ])
@@ -1329,11 +1331,13 @@ async def admin_user_delete(callback: CallbackQuery):
 
 
 # ✅ ФИНАЛЬНОЕ УДАЛЕНИЕ
-@router.callback_query(F.data.startswith("admin_user_delete_final_"))
-async def admin_user_delete_final(callback: CallbackQuery):
+@router.callback_query(F.data.startswith("delete_user_"))
+async def delete_user(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
+    
+    logger.info(f"🔍 delete_user: {callback.data}")  # 👈 ЛОГ
     
     user_id = int(callback.data.split("_")[-1])
     
@@ -1405,7 +1409,6 @@ async def admin_user_delete_final(callback: CallbackQuery):
             ])
         )
         await callback.answer(f"❌ Ошибка: {e}", show_alert=True)
-
 
 async def show_users_list(target, page: int = 1, search_query: str = None):
     """Отображает список пользователей с пагинацией и кнопками."""
