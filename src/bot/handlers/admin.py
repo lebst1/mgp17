@@ -1337,7 +1337,7 @@ async def delete_user(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    logger.info(f"🔍 delete_user: {callback.data}")  # 👈 ЛОГ
+    logger.info(f"🔍 delete_user: {callback.data}")
     
     user_id = int(callback.data.split("_")[-1])
     
@@ -1402,13 +1402,18 @@ async def delete_user(callback: CallbackQuery):
         
     except Exception as e:
         logger.error(f"❌ Ошибка удаления пользователя {user_id}: {e}")
+        # ✅ ОБРЕЗАЕМ СООБЩЕНИЕ ОБ ОШИБКЕ
+        error_msg = str(e)
+        if len(error_msg) > 200:
+            error_msg = error_msg[:200] + "..."
+        
         await callback.message.answer(
-            f"❌ Ошибка при удалении: {e}",
+            f"❌ Ошибка при удалении: {error_msg}",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_users")]
             ])
         )
-        await callback.answer(f"❌ Ошибка: {e}", show_alert=True)
+        await callback.answer("❌ Ошибка при удалении", show_alert=True)
 
 async def show_users_list(target, page: int = 1, search_query: str = None):
     """Отображает список пользователей с пагинацией и кнопками."""
