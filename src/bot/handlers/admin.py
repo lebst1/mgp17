@@ -1136,13 +1136,11 @@ async def process_ban_unban(message: Message, state: FSMContext):
 
 # ✅ НОВЫЙ СПИСОК ПОЛЬЗОВАТЕЛЕЙ С ПАГИНАЦИЕЙ И КНОПКАМИ
 
-@router.callback_query(lambda c: c.data == "admin_users")
+@router.callback_query(F.data == "admin_users")
 async def admin_users(callback: CallbackQuery):
-    """Список пользователей с пагинацией и кнопками перехода в чат."""
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-    
     await show_users_list(callback.message, 1)
     await callback.answer()
 
@@ -1170,7 +1168,7 @@ async def admin_user_chat(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(lambda c: c.data.startswith("admin_user_menu_"))
+@router.callback_query(F.data.startswith("admin_user_menu_"))
 async def admin_user_menu(callback: CallbackQuery):
     """Меню управления пользователем."""
     if not await is_admin(callback.from_user.id):
@@ -1179,12 +1177,11 @@ async def admin_user_menu(callback: CallbackQuery):
     
     user_id = int(callback.data.split("_")[-1])
     
-    # ✅ Загружаем пользователя ВМЕСТЕ с рефералами через сессию
     async with async_session() as session:
         user = await session.scalar(
             select(User)
             .where(User.telegram_id == user_id)
-            .options(selectinload(User.direct_referrals))  # 👈 ЗАГРУЖАЕМ РЕФЕРАЛОВ
+            .options(selectinload(User.direct_referrals))
         )
         
         if not user:
@@ -1194,8 +1191,6 @@ async def admin_user_menu(callback: CallbackQuery):
         sub_status = "✅ Активна" if user.has_active_subscription() else "❌ Истекла"
         sub_until = user.subscription_until.strftime("%d.%m.%Y") if user.subscription_until else "—"
         status_icon = "🟢 Активен" if user.is_active else "🔴 Заблокирован"
-        
-        # ✅ Теперь можно безопасно обращаться к direct_referrals
         referrals_count = len(user.direct_referrals) if user.direct_referrals else 0
         
         text = f"""
@@ -1290,7 +1285,7 @@ async def admin_user_revoke_sub(callback: CallbackQuery):
         await callback.answer(f"❌ Пользователь {user_id} не найден!", show_alert=True)
 
 
-@router.callback_query(lambda c: c.data.startswith("admin_user_delete_"))
+@router.callback_query(F.data.startswith("admin_user_delete_"))
 async def admin_user_delete(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
@@ -1305,8 +1300,7 @@ async def admin_user_delete(callback: CallbackQuery):
         ]
     ])
     
-    await safe_edit_message(
-        callback.message,
+    await callback.message.edit_text(
         f"⚠️ <b>Удалить пользователя?</b>\n\n"
         f"ID: <code>{user_id}</code>\n\n"
         f"Будут удалены ВСЕ данные пользователя:\n"
@@ -1315,11 +1309,12 @@ async def admin_user_delete(callback: CallbackQuery):
         f"• Настройки\n"
         f"• Реферальные бонусы\n\n"
         f"Это действие НЕОБРАТИМО!",
-        keyboard
+        reply_markup=keyboard,
+        parse_mode="HTML"
     )
     await callback.answer()
 
-@router.callback_query(lambda c: c.data.startswith("admin_user_delete_confirm_"))
+@router.callback_query(F.data.startswith("admin_user_delete_confirm_"))
 async def admin_user_delete_confirm(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
@@ -1374,10 +1369,10 @@ async def admin_user_delete_confirm(callback: CallbackQuery):
             [InlineKeyboardButton(text="🔙 Назад к списку", callback_data="admin_users")]
         ])
         
-        await safe_edit_message(
-            callback.message,
+        await callback.message.edit_text(
             f"✅ Пользователь <code>{user_id}</code> полностью удален из БД!",
-            keyboard
+            reply_markup=keyboard,
+            parse_mode="HTML"
         )
         await callback.answer("✅ Пользователь удален!", show_alert=True)
         
@@ -1458,7 +1453,6 @@ async def show_users_list(target, page: int = 1, search_query: str = None):
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
     await safe_edit_message(target, text, keyboard)
-
 
 @router.callback_query(lambda c: c.data == "admin_users_search")
 async def admin_users_search(callback: CallbackQuery, state: FSMContext):
