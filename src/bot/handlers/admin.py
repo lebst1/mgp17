@@ -17,6 +17,7 @@ import os
 import logging
 from datetime import datetime, timedelta
 import pytz
+from sqlalchemy.orm import selectinload
 
 logger = logging.getLogger(__name__)
 
@@ -1177,16 +1178,27 @@ async def admin_user_menu(callback: CallbackQuery):
         return
     
     user_id = int(callback.data.split("_")[-1])
-    user = await UserRepository.get_by_id(user_id)
-    if not user:
-        await callback.answer("❌ Пользователь не найден", show_alert=True)
-        return
     
-    sub_status = "✅ Активна" if user.has_active_subscription() else "❌ Истекла"
-    sub_until = user.subscription_until.strftime("%d.%m.%Y") if user.subscription_until else "—"
-    status_icon = "🟢 Активен" if user.is_active else "🔴 Заблокирован"
-    
-    text = f"""
+    # ✅ Загружаем пользователя ВМЕСТЕ с рефералами через сессию
+    async with async_session() as session:
+        user = await session.scalar(
+            select(User)
+            .where(User.telegram_id == user_id)
+            .options(selectinload(User.direct_referrals))  # 👈 ЗАГРУЖАЕМ РЕФЕРАЛОВ
+        )
+        
+        if not user:
+            await callback.answer("❌ Пользователь не найден", show_alert=True)
+            return
+        
+        sub_status = "✅ Активна" if user.has_active_subscription() else "❌ Истекла"
+        sub_until = user.subscription_until.strftime("%d.%m.%Y") if user.subscription_until else "—"
+        status_icon = "🟢 Активен" if user.is_active else "🔴 Заблокирован"
+        
+        # ✅ Теперь можно безопасно обращаться к direct_referrals
+        referrals_count = len(user.direct_referrals) if user.direct_referrals else 0
+        
+        text = f"""
 📋 <b>Меню пользователя</b>
 
 ━━━━━━━━━━━━━━━━━━━━━
@@ -1196,7 +1208,7 @@ async def admin_user_menu(callback: CallbackQuery):
 ✅ Статус: {status_icon}
 💳 Подписка: {sub_status} (до {sub_until})
 📊 Сообщений: {user.messages_saved or 0}
-🎁 Рефералов: {len(user.direct_referrals) if user.direct_referrals else 0}
+🎁 Рефералов: {referrals_count}
 📅 Зарегистрирован: {format_datetime(user.created_at)}
 ━━━━━━━━━━━━━━━━━━━━━
 
@@ -1228,7 +1240,6 @@ async def admin_user_menu(callback: CallbackQuery):
     except Exception:
         await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
-
 
 @router.callback_query(lambda c: c.data.startswith("admin_user_grant_sub_"))
 async def admin_user_grant_sub(callback: CallbackQuery, state: FSMContext):
