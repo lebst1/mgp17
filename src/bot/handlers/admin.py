@@ -1319,7 +1319,6 @@ async def admin_user_delete(callback: CallbackQuery):
     )
     await callback.answer()
 
-
 @router.callback_query(lambda c: c.data.startswith("admin_user_delete_confirm_"))
 async def admin_user_delete_confirm(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
@@ -1330,6 +1329,7 @@ async def admin_user_delete_confirm(callback: CallbackQuery):
     
     try:
         async with async_session() as session:
+            # 1. Удаляем сообщения
             messages = await session.scalars(
                 select(SavedMessage).where(SavedMessage.user_id == user_id)
             )
@@ -1341,6 +1341,7 @@ async def admin_user_delete_confirm(callback: CallbackQuery):
                         pass
                 await session.delete(msg)
             
+            # 2. Удаляем реферальные бонусы
             bonuses = await session.scalars(
                 select(ReferralBonus).where(
                     or_(
@@ -1352,12 +1353,14 @@ async def admin_user_delete_confirm(callback: CallbackQuery):
             for bonus in bonuses:
                 await session.delete(bonus)
             
+            # 3. Удаляем бизнес-подключения
             connections = await session.scalars(
                 select(BusinessConnection).where(BusinessConnection.user_id == user_id)
             )
             for conn in connections:
                 await session.delete(conn)
             
+            # 4. Удаляем самого пользователя
             user = await session.scalar(
                 select(User).where(User.telegram_id == user_id)
             )
@@ -1366,19 +1369,21 @@ async def admin_user_delete_confirm(callback: CallbackQuery):
             
             await session.commit()
         
+        # ✅ Сообщение об успехе
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад к списку", callback_data="admin_users")]
+        ])
+        
         await safe_edit_message(
             callback.message,
-            f"✅ Пользователь <code>{user_id}</code> полностью удален!",
-            InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_users")]
-            ]),
+            f"✅ Пользователь <code>{user_id}</code> полностью удален из БД!",
+            keyboard
         )
         await callback.answer("✅ Пользователь удален!", show_alert=True)
         
     except Exception as e:
         logger.error(f"❌ Ошибка удаления пользователя {user_id}: {e}")
-        await callback.answer("❌ Ошибка при удалении", show_alert=True)
-
+        await callback.answer(f"❌ Ошибка при удалении: {e}", show_alert=True)
 
 async def show_users_list(target, page: int = 1, search_query: str = None):
     """Отображает список пользователей с пагинацией и кнопками."""
