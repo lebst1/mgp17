@@ -12,12 +12,12 @@ from src.db.repositories.payment_repository import PaymentRepository
 from src.db.session import async_session, cleanup_old_data
 from src.config import settings
 from sqlalchemy import select, func, or_, and_, desc, case
+from sqlalchemy.orm import selectinload
 from src.db.models import User, SavedMessage, BusinessConnection, Payment, ReferralBonus
 import os
 import logging
 from datetime import datetime, timedelta
 import pytz
-from sqlalchemy.orm import selectinload
 
 logger = logging.getLogger(__name__)
 
@@ -1136,11 +1136,13 @@ async def process_ban_unban(message: Message, state: FSMContext):
 
 # ✅ НОВЫЙ СПИСОК ПОЛЬЗОВАТЕЛЕЙ С ПАГИНАЦИЕЙ И КНОПКАМИ
 
-@router.callback_query(F.data == "admin_users")
+@router.callback_query(lambda c: c.data == "admin_users")
 async def admin_users(callback: CallbackQuery):
+    """Список пользователей с пагинацией и кнопками перехода в чат."""
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
+    
     await show_users_list(callback.message, 1)
     await callback.answer()
 
@@ -1168,6 +1170,7 @@ async def admin_user_chat(callback: CallbackQuery):
     await callback.answer()
 
 
+# ✅ МЕНЮ ПОЛЬЗОВАТЕЛЯ
 @router.callback_query(F.data.startswith("admin_user_menu_"))
 async def admin_user_menu(callback: CallbackQuery):
     """Меню управления пользователем."""
@@ -1236,7 +1239,9 @@ async def admin_user_menu(callback: CallbackQuery):
         await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
 
-@router.callback_query(lambda c: c.data.startswith("admin_user_grant_sub_"))
+
+# ✅ ВЫДАТЬ ПОДПИСКУ ИЗ МЕНЮ
+@router.callback_query(F.data.startswith("admin_user_grant_sub_"))
 async def admin_user_grant_sub(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
@@ -1269,7 +1274,8 @@ async def admin_user_grant_sub(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.callback_query(lambda c: c.data.startswith("admin_user_revoke_sub_"))
+# ✅ ЗАБРАТЬ ПОДПИСКУ ИЗ МЕНЮ
+@router.callback_query(F.data.startswith("admin_user_revoke_sub_"))
 async def admin_user_revoke_sub(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
@@ -1285,6 +1291,7 @@ async def admin_user_revoke_sub(callback: CallbackQuery):
         await callback.answer(f"❌ Пользователь {user_id} не найден!", show_alert=True)
 
 
+# ✅ УДАЛЕНИЕ ПОЛЬЗОВАТЕЛЯ (НОВОЕ)
 @router.callback_query(F.data.startswith("admin_user_delete_"))
 async def admin_user_delete(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
@@ -1295,38 +1302,50 @@ async def admin_user_delete(callback: CallbackQuery):
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"admin_user_delete_confirm_{user_id}"),
+            InlineKeyboardButton(text="✅ Да, удалить навсегда", callback_data=f"admin_user_delete_final_{user_id}"),
             InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin_user_menu_{user_id}"),
         ]
     ])
     
-    text = f"⚠️ <b>Удалить пользователя?</b>\n\nID: <code>{user_id}</code>\n\nБудут удалены ВСЕ данные пользователя:\n• Сообщения\n• Медиа-файлы\n• Настройки\n• Реферальные бонусы\n\nЭто действие НЕОБРАТИМО!"
+    text = f"""
+⚠️ <b>ПОДТВЕРЖДЕНИЕ УДАЛЕНИЯ</b>
+
+Вы действительно хотите удалить пользователя?
+
+👤 ID: <code>{user_id}</code>
+
+<b>Будут удалены:</b>
+• Все сообщения пользователя
+• Все медиа-файлы
+• Настройки SAVE MODE
+• Реферальные бонусы
+• Бизнес-подключения
+
+<b>Это действие НЕОБРАТИМО!</b>
+"""
     
-    try:
-        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-    except Exception as e:
-        if "message is not modified" in str(e):
-            # Если сообщение уже такое же — просто отвечаем
-            await callback.answer("⚠️ Вы уже на этом экране")
-        else:
-            # Если другая ошибка — пробуем отправить новое сообщение
-            await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
-    await callback.answer()
-    
-@router.callback_query(F.data.startswith("admin_user_delete_confirm_"))
-async def admin_user_delete_confirm(callback: CallbackQuery):
+    await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer("⚠️ Подтвердите удаление")
+
+
+# ✅ ФИНАЛЬНОЕ УДАЛЕНИЕ
+@router.callback_query(F.data.startswith("admin_user_delete_final_"))
+async def admin_user_delete_final(callback: CallbackQuery):
     if not await is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
     user_id = int(callback.data.split("_")[-1])
     
+    await callback.answer("⏳ Удаление...", show_alert=False)
+    
     try:
         async with async_session() as session:
-            # 1. Удаляем сообщения
+            # 1. Удаляем сообщения и медиа
             messages = await session.scalars(
                 select(SavedMessage).where(SavedMessage.user_id == user_id)
             )
+            deleted_messages = 0
             for msg in messages:
                 if msg.media_path and os.path.exists(msg.media_path):
                     try:
@@ -1334,6 +1353,7 @@ async def admin_user_delete_confirm(callback: CallbackQuery):
                     except:
                         pass
                 await session.delete(msg)
+                deleted_messages += 1
             
             # 2. Удаляем реферальные бонусы
             bonuses = await session.scalars(
@@ -1369,7 +1389,8 @@ async def admin_user_delete_confirm(callback: CallbackQuery):
         ])
         
         await callback.message.edit_text(
-            f"✅ Пользователь <code>{user_id}</code> полностью удален из БД!",
+            f"✅ Пользователь <code>{user_id}</code> ПОЛНОСТЬЮ УДАЛЕН!\n\n"
+            f"Удалено сообщений: {deleted_messages}",
             reply_markup=keyboard,
             parse_mode="HTML"
         )
@@ -1377,7 +1398,14 @@ async def admin_user_delete_confirm(callback: CallbackQuery):
         
     except Exception as e:
         logger.error(f"❌ Ошибка удаления пользователя {user_id}: {e}")
-        await callback.answer(f"❌ Ошибка при удалении: {e}", show_alert=True)
+        await callback.message.answer(
+            f"❌ Ошибка при удалении: {e}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_users")]
+            ])
+        )
+        await callback.answer(f"❌ Ошибка: {e}", show_alert=True)
+
 
 async def show_users_list(target, page: int = 1, search_query: str = None):
     """Отображает список пользователей с пагинацией и кнопками."""
@@ -1452,6 +1480,7 @@ async def show_users_list(target, page: int = 1, search_query: str = None):
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
     await safe_edit_message(target, text, keyboard)
+
 
 @router.callback_query(lambda c: c.data == "admin_users_search")
 async def admin_users_search(callback: CallbackQuery, state: FSMContext):
