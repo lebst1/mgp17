@@ -7,7 +7,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-from src.services.backup import backup_loop
+
 from src.config import settings
 from src.bot.middlewares.auth import AuthMiddleware
 from src.bot.middlewares.subscription import SubscriptionMiddleware
@@ -23,7 +23,8 @@ from src.bot.handlers import (
 from src.business_bot.handlers import router as business_router
 from src.db.session import init_db
 from src.utils.sentry import SentryStub
-from src.services.subscription_checker import subscription_checker_loop  # 👈 ДОБАВЛЯЕМ
+from src.services.subscription_checker import subscription_checker_loop
+from src.services.backup import backup_loop, cleanup_media_if_needed
 
 # Настройка логирования
 logging.basicConfig(
@@ -32,6 +33,16 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def media_cleanup_loop():
+    """Фоновый цикл очистки медиа (раз в 6 часов)"""
+    while True:
+        try:
+            await cleanup_media_if_needed()
+        except Exception as e:
+            logger.error(f"❌ Ошибка в цикле очистки медиа: {e}")
+        await asyncio.sleep(21600)  # 6 часов
 
 
 async def main() -> None:
@@ -69,9 +80,15 @@ async def main() -> None:
         logger.info(f"🚀 Бот запущен: @{settings.BOT_USERNAME}")
         logger.info(f"👤 Владелец: {settings.OWNER_TELEGRAM_ID}")
 
-        # 👇 ЗАПУСКАЕМ ФОНОВУЮ ПРОВЕРКУ ПОДПИСОК
+        # Запускаем фоновые сервисы
+        asyncio.create_task(subscription_checker_loop(bot))
+        logger.info("✅ Фоновый сервис проверки подписок запущен")
+
         asyncio.create_task(backup_loop())
         logger.info("✅ Фоновый сервис бэкапов запущен")
+
+        asyncio.create_task(media_cleanup_loop())
+        logger.info("✅ Фоновый сервис очистки медиа запущен")
 
         await dp.start_polling(bot)
 
