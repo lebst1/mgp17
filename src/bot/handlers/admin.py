@@ -479,6 +479,9 @@ async def show_chats_list(target, user_id: int, page: int = 1):
             await target.answer("❌ Пользователь не найден")
             return
         
+        # 👇 ВЫНОСИМ offset НАРУЖУ
+        offset = (page - 1) * CHATS_PER_PAGE
+        
         # Проверяем, есть ли бизнес-подключения у пользователя
         connections = await session.scalars(
             select(BusinessConnection).where(BusinessConnection.user_id == user_id)
@@ -488,7 +491,6 @@ async def show_chats_list(target, user_id: int, page: int = 1):
         # Если есть Business-подключения — показываем их, даже если нет сообщений
         if connections:
             # Получаем ВСЕ чаты из бизнес-подключений
-            # Показываем и те, где есть сообщения, и те, где их нет
             chats_query = text("""
                 SELECT 
                     sm.chat_id,
