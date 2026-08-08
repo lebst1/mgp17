@@ -1,7 +1,6 @@
 import os
 from typing import Optional, List
 from pydantic_settings import BaseSettings
-from pydantic import Field
 
 
 class Settings(BaseSettings):
@@ -39,9 +38,10 @@ class Settings(BaseSettings):
     REFERRAL_BONUS_REFERRER_DAYS: int = 3
     REFERRAL_BONUS_REFERRED_DAYS: int = 1
 
-    # Telegram Stars
-    SUBSCRIPTION_PRICE_STARS: int = 1  # 👈 ДОБАВИТЬ
-    SUBSCRIPTION_DAYS: int = 30           # 👈 ДОБАВИТЬ
+    # Подписка
+    SUBSCRIPTION_PRICE_STARS: int = 1
+    SUBSCRIPTION_DAYS: int = 30
+    TRIAL_DAYS: int = 1  # 👈 ДОБАВЛЕНО
 
     class Config:
         env_file = ".env"
