@@ -43,6 +43,55 @@ async def create_backup():
         return None
 
 
+async def cleanup_media_if_needed():
+    """Очищает медиа, если папка превышает лимит"""
+    try:
+        media_dir = settings.MEDIA_DIR
+        if not os.path.exists(media_dir):
+            return
+        
+        # Лимит — 500 МБ
+        MAX_MEDIA_SIZE_MB = 500
+        max_bytes = MAX_MEDIA_SIZE_MB * 1024 * 1024
+        
+        # Считаем размер папки
+        total_size = 0
+        files = []
+        for f in os.listdir(media_dir):
+            f_path = os.path.join(media_dir, f)
+            if os.path.isfile(f_path):
+                size = os.path.getsize(f_path)
+                total_size += size
+                files.append((f_path, size))
+        
+        # Если меньше лимита — ничего не делаем
+        if total_size < max_bytes:
+            logger.info(f"💾 Медиа: {total_size/1024/1024:.2f} МБ (лимит {MAX_MEDIA_SIZE_MB} МБ) — очистка не нужна")
+            return
+        
+        # Сортируем по дате создания (старые сначала)
+        files.sort(key=lambda x: os.path.getctime(x[0]))
+        
+        # Удаляем старые файлы, пока не освободим место
+        freed = 0
+        removed = 0
+        for f_path, size in files:
+            if total_size - freed < max_bytes:
+                break
+            try:
+                os.remove(f_path)
+                freed += size
+                removed += 1
+            except Exception as e:
+                logger.error(f"❌ Не удалось удалить {f_path}: {e}")
+        
+        logger.info(f"🗑️ Очистка медиа: удалено {removed} файлов ({freed/1024/1024:.2f} МБ)")
+        logger.info(f"💾 Текущий размер: {(total_size - freed)/1024/1024:.2f} МБ")
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка очистки медиа: {e}")
+
+
 async def backup_loop():
     """Фоновый цикл создания бэкапов (раз в день)"""
     import asyncio
