@@ -19,7 +19,7 @@ import logging
 from datetime import datetime, timedelta
 import pytz
 from src.db.models import User, SavedMessage, BusinessConnection, Payment, ReferralBonus, PaymentProvider, OrderStatus
-
+from sqlalchemy import select, func, or_, and_, desc, case, text
 
 logger = logging.getLogger(__name__)
 
@@ -477,24 +477,6 @@ async def show_chats_list(target, user_id: int, page: int = 1):
             await target.answer("❌ Пользователь не найден")
             return
         
-        # Получаем список чатов с дополнительной информацией
-        chats_query = """
-            SELECT 
-                chat_id,
-                MAX(chat_title) as chat_title,
-                MAX(from_username) as from_username,
-                MAX(from_first_name) as from_first_name,
-                COUNT(id) as count,
-                MAX(saved_at) as last_activity,
-                SUM(CASE WHEN is_deleted = 1 THEN 1 ELSE 0 END) as deleted_count,
-                SUM(CASE WHEN is_edited = 1 THEN 1 ELSE 0 END) as edited_count
-            FROM saved_messages
-            WHERE user_id = :user_id
-            GROUP BY chat_id
-            ORDER BY last_activity DESC
-            LIMIT :limit OFFSET :offset
-        """
-        
         # Сначала считаем общее количество чатов
         total_chats_result = await session.execute(
             text("""
@@ -510,8 +492,25 @@ async def show_chats_list(target, user_id: int, page: int = 1):
         offset = (page - 1) * CHATS_PER_PAGE
         
         # Получаем чаты с информацией о собеседнике
+        chats_query = text("""
+            SELECT 
+                chat_id,
+                MAX(chat_title) as chat_title,
+                MAX(from_username) as from_username,
+                MAX(from_first_name) as from_first_name,
+                COUNT(id) as count,
+                MAX(saved_at) as last_activity,
+                SUM(CASE WHEN is_deleted = 1 THEN 1 ELSE 0 END) as deleted_count,
+                SUM(CASE WHEN is_edited = 1 THEN 1 ELSE 0 END) as edited_count
+            FROM saved_messages
+            WHERE user_id = :user_id
+            GROUP BY chat_id
+            ORDER BY last_activity DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        
         chats = await session.execute(
-            text(chats_query),
+            chats_query,
             {
                 "user_id": user_id,
                 "limit": CHATS_PER_PAGE,
@@ -529,7 +528,7 @@ async def show_chats_list(target, user_id: int, page: int = 1):
     if user.username:
         user_info += f" (@{user.username})"
     
-    text = f"""
+    result_text = f"""
 📋 <b>Чаты пользователя</b>
 {user_info}
 🆔 <code>{user.telegram_id}</code>
@@ -604,7 +603,7 @@ async def show_chats_list(target, user_id: int, page: int = 1):
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
     
-    await target.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    await target.answer(result_text, reply_markup=keyboard, parse_mode="HTML")
 
 # ✅ ОТКРЫТЬ КОНКРЕТНЫЙ ЧАТ
 @router.callback_query(lambda c: c.data.startswith("admin_chat_open_"))
