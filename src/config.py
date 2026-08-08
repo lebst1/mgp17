@@ -39,9 +39,9 @@ class Settings(BaseSettings):
     REFERRAL_BONUS_REFERRED_DAYS: int = 1
 
     # Подписка
-    SUBSCRIPTION_PRICE_STARS: int = 1
+    SUBSCRIPTION_PRICE_STARS: int = 100
     SUBSCRIPTION_DAYS: int = 30
-    TRIAL_DAYS: int = 1  # 👈 ДОБАВЛЕНО
+    TRIAL_DAYS: int = 1
 
     class Config:
         env_file = ".env"

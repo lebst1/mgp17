@@ -29,6 +29,7 @@ class ReferralBonusStatus(PyEnum):
 class PaymentProvider(PyEnum):
     YOOKASSA = "yookassa"
     STRIPE = "stripe"
+    STARS = "stars"  # 👈 ДОБАВЛЯЕМ
 
 
 class TransactionType(PyEnum):

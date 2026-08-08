@@ -2,12 +2,13 @@ from aiogram import Router, F, types
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, PreCheckoutQuery, LabeledPrice
 from aiogram.filters import Command
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from src.config import settings
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.subscription_repository import SubscriptionRepository
-from src.db.models import OrderStatus
+from src.db.models import OrderStatus, PaymentProvider
+from src.db.repositories.payment_repository import PaymentRepository
 from src.utils.sentry import SentryStub
 
 logger = logging.getLogger(__name__)
@@ -116,11 +117,9 @@ async def subscribe_buy_stars(callback: CallbackQuery):
         # Создаем инвойс
         prices = [LabeledPrice(
             label=f"Подписка на {settings.SUBSCRIPTION_DAYS} дней",
-            amount=settings.SUBSCRIPTION_PRICE_STARS *1
+            amount=settings.SUBSCRIPTION_PRICE_STARS * 1
         )]
         
-        # Для Stars НЕЛЬЗЯ передавать reply_markup с кнопками
-        # Telegram сам добавляет кнопку оплаты
         await callback.bot.send_invoice(
             chat_id=user_id,
             title=f"Подписка SafeSaverX на {settings.SUBSCRIPTION_DAYS} дней",
@@ -130,7 +129,6 @@ async def subscribe_buy_stars(callback: CallbackQuery):
             currency="XTR",
             prices=prices,
             start_parameter="subscription",
-            # ❌ НЕ ПЕРЕДАВАЙ reply_markup
         )
         logger.info(f"💳 Создан инвойс для пользователя {user_id}")
         
@@ -138,6 +136,7 @@ async def subscribe_buy_stars(callback: CallbackQuery):
         SentryStub.capture_exception(e, context="subscribe_buy_stars", user_id=user_id)
         logger.exception(f"❌ Ошибка создания инвойса: {e}")
         await callback.message.answer("❌ Ошибка создания платежа. Попробуйте позже.")
+
 
 @router.pre_checkout_query()
 async def pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
@@ -166,6 +165,18 @@ async def successful_payment(message: Message):
     logger.info(f"💳 Успешный платеж от {user_id}: {payment_info}")
 
     try:
+        # ✅ СОХРАНЯЕМ ПЛАТЕЖ В БД
+        await PaymentRepository.create(
+            user_id=user_id,
+            payment_id=payment_info.provider_payment_charge_id,
+            amount=payment_info.total_amount // 100,
+            status=OrderStatus.PAID,
+            provider=PaymentProvider.STARS,
+            currency="XTR",
+            description=f"Подписка на {settings.SUBSCRIPTION_DAYS} дней через Stars",
+            provider_raw={"telegram_payment": payment_info.model_dump()}
+        )
+
         # Начисляем подписку
         user = await UserRepository.extend_subscription(
             user_id,
@@ -195,7 +206,6 @@ async def successful_payment(message: Message):
             bonus = await ReferralRepository.get_bonus_for_referred(user_id)
             if bonus and bonus.status == "held":
                 # Если есть HELD бонус — выпускаем его
-                from src.db.repositories.payment_repository import PaymentRepository
                 payment = await PaymentRepository.get_by_payment_id(payment_info.provider_payment_charge_id)
                 if payment:
                     await ReferralRepository.release_bonus_after_first_payment(
