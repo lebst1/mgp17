@@ -1,30 +1,48 @@
-from __future__ import annotations
+import base64
+import logging
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-from functools import lru_cache
+from src.config import settings
 
-from cryptography.fernet import Fernet, InvalidToken
-
-from src.config import get_settings
+logger = logging.getLogger(__name__)
 
 
-@lru_cache(maxsize=1)
-def _fernet() -> Fernet:
-    key = get_settings().encryption_key
+def get_encryption_key() -> bytes:
+    """Получает или генерирует ключ шифрования из settings"""
+    key = settings.ENCRYPTION_KEY
     if not key:
-        raise RuntimeError("ENCRYPTION_KEY is required before storing secrets")
-    return Fernet(key.encode())
+        # Если ключа нет, генерируем новый
+        key = Fernet.generate_key().decode()
+        logger.warning("⚠️ ENCRYPTION_KEY не задан в .env, сгенерирован временный ключ")
+        logger.warning(f"📌 Добавьте в .env: ENCRYPTION_KEY={key}")
+    return key.encode()
 
 
-def encrypt_secret(value: str | None) -> str:
-    if not value:
-        return ""
-    return _fernet().encrypt(value.encode("utf-8")).decode("ascii")
-
-
-def decrypt_secret(value: str | None) -> str:
-    if not value:
+def encrypt_secret(secret: str) -> str:
+    """Шифрует секрет"""
+    if not secret:
         return ""
     try:
-        return _fernet().decrypt(value.encode("ascii")).decode("utf-8")
-    except InvalidToken as exc:
-        raise RuntimeError("Cannot decrypt secret with current ENCRYPTION_KEY") from exc
+        key = get_encryption_key()
+        f = Fernet(key)
+        encrypted = f.encrypt(secret.encode())
+        return base64.b64encode(encrypted).decode()
+    except Exception as e:
+        logger.error(f"❌ Ошибка шифрования: {e}")
+        return secret
+
+
+def decrypt_secret(encrypted: str) -> str:
+    """Расшифровывает секрет"""
+    if not encrypted:
+        return ""
+    try:
+        key = get_encryption_key()
+        f = Fernet(key)
+        decrypted = f.decrypt(base64.b64decode(encrypted))
+        return decrypted.decode()
+    except Exception as e:
+        logger.error(f"❌ Ошибка расшифровки: {e}")
+        return ""
