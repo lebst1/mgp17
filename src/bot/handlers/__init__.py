@@ -4,7 +4,7 @@ from .referral import router as referral_router
 from .subscription import router as subscription_router
 from .admin import router as admin_router
 from .save_mode import router as save_mode_router
-# from .settings import router as settings_router  # 👈 ЗАКОММЕНТИРОВАЛИ
+from .support import router as support_router  # 👈 ДОБАВИТЬ
 
 __all__ = [
     "start_router",
@@ -13,5 +13,5 @@ __all__ = [
     "subscription_router",
     "admin_router",
     "save_mode_router",
-    # "settings_router",
+    "support_router",  # 👈 ДОБАВИТЬ
 ]

@@ -18,8 +18,9 @@ from src.bot.handlers import (
     subscription_router,
     admin_router,
     save_mode_router,
+    support_router,  # 👈 ДОБАВЛЯЕМ
 )
-from src.business_bot.handlers import router as business_router  # 👈 ДОБАВЛЯЕМ
+from src.business_bot.handlers import router as business_router
 from src.db.session import init_db
 from src.utils.sentry import SentryStub
 
@@ -61,7 +62,8 @@ async def main() -> None:
         dp.include_router(subscription_router)
         dp.include_router(admin_router)
         dp.include_router(save_mode_router)
-        dp.include_router(business_router)  # 👈 ДОБАВЛЯЕМ
+        dp.include_router(support_router)  # 👈 ДОБАВЛЯЕМ
+        dp.include_router(business_router)
 
         logger.info(f"🚀 Бот запущен: @{settings.BOT_USERNAME}")
         logger.info(f"👤 Владелец: {settings.OWNER_TELEGRAM_ID}")

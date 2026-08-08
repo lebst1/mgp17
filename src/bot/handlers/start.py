@@ -81,27 +81,30 @@ async def get_main_menu(user, has_business):
 """
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="👤 Профиль", callback_data="profile_menu"),
-            InlineKeyboardButton(text="🎁 Рефералы (бонус за регистрацию)", callback_data="referral_menu"),
-        ],
-        [
-            InlineKeyboardButton(text="💳 Подписка", callback_data="subscribe_menu"),
-            InlineKeyboardButton(text="📝 SAVE MODE", callback_data="savemode"),
-        ],
-        [
-            InlineKeyboardButton(
-                text="📋 Скопировать юзернейм",
-                copy_text=CopyTextButton(
-                    text=f"@{settings.BOT_USERNAME.lstrip('@')}"
-                )
+    [
+        InlineKeyboardButton(text="👤 Профиль", callback_data="profile_menu"),
+        InlineKeyboardButton(text="🎁 Рефералы (бонус за регистрацию)", callback_data="referral_menu"),
+    ],
+    [
+        InlineKeyboardButton(text="💳 Подписка", callback_data="subscribe_menu"),
+        InlineKeyboardButton(text="📝 SAVE MODE", callback_data="savemode"),
+    ],
+    [
+        InlineKeyboardButton(
+            text="📋 Скопировать юзернейм",
+            copy_text=CopyTextButton(
+                text=f"@{settings.BOT_USERNAME.lstrip('@')}"
             )
-        ],
-        [
-            InlineKeyboardButton(text="❓ Описание команд", callback_data="show_help"),
-            InlineKeyboardButton(text="⭐ Важное", callback_data="important"),
-        ],
-    ])
+        )
+    ],
+    [
+        InlineKeyboardButton(text="❓ Описание команд", callback_data="show_help"),
+        InlineKeyboardButton(text="⭐ Важное", callback_data="important"),
+    ],
+    [
+        InlineKeyboardButton(text="🆘 Поддержка", callback_data="support"),  # 👈 ДОБАВИТЬ
+    ],
+])
 
     return text, keyboard
 
