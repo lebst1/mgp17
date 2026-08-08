@@ -116,7 +116,7 @@ async def subscribe_buy_stars(callback: CallbackQuery):
         # Создаем инвойс
         prices = [LabeledPrice(
             label=f"Подписка на {settings.SUBSCRIPTION_DAYS} дней",
-            amount=settings.SUBSCRIPTION_PRICE_STARS * 100
+            amount=settings.SUBSCRIPTION_PRICE_STARS *1
         )]
         
         # Для Stars НЕЛЬЗЯ передавать reply_markup с кнопками
