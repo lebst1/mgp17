@@ -7,7 +7,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-
+from src.services.backup import backup_loop
 from src.config import settings
 from src.bot.middlewares.auth import AuthMiddleware
 from src.bot.middlewares.subscription import SubscriptionMiddleware
@@ -70,8 +70,8 @@ async def main() -> None:
         logger.info(f"👤 Владелец: {settings.OWNER_TELEGRAM_ID}")
 
         # 👇 ЗАПУСКАЕМ ФОНОВУЮ ПРОВЕРКУ ПОДПИСОК
-        asyncio.create_task(subscription_checker_loop(bot))
-        logger.info("✅ Фоновый сервис проверки подписок запущен")
+        asyncio.create_task(backup_loop())
+        logger.info("✅ Фоновый сервис бэкапов запущен")
 
         await dp.start_polling(bot)
 

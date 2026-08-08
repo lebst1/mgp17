@@ -5,6 +5,7 @@ import os
 import logging
 import re
 
+from src.services.health_check import check_health
 from src.config import settings
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.business_repository import BusinessRepository
@@ -148,6 +149,27 @@ async def start_command(message: Message):
         await message.answer("❌ Ошибка инициализации. Попробуйте ещё раз через несколько секунд.")
         return
 
+    # ✅ УВЕДОМЛЕНИЕ О НОВОМ ПОЛЬЗОВАТЕЛЕ
+    if is_new:
+        try:
+            from datetime import datetime
+            user_info = f"""
+👤 <b>Новый пользователь!</b>
+
+🆔 ID: <code>{user.telegram_id}</code>
+👤 Имя: {user.first_name or 'Не указано'}
+📛 Username: @{user.username or 'Нет'}
+📅 Зарегистрирован: {datetime.now().strftime('%d.%m.%Y %H:%M')}
+🔗 Реферал: {'Да' if referral_code else 'Нет'}
+"""
+            await message.bot.send_message(
+                chat_id=settings.OWNER_TELEGRAM_ID,
+                text=user_info,
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"❌ Не удалось отправить уведомление о новом пользователе: {e}")
+
     if referral_code and is_new:
         try:
             resolved = await UserRepository.resolve_referral_code(referral_code)
@@ -165,7 +187,6 @@ async def start_command(message: Message):
     has_business = len(connections) > 0
 
     await send_main_menu(message, user, has_business)
-
 
 @router.callback_query(lambda c: c.data == "edit_profile")
 async def edit_profile(callback: CallbackQuery):
@@ -232,6 +253,22 @@ async def important(callback: CallbackQuery):
 
     await callback.answer()
 
+@router.message(Command("health"))
+async def health_command(message: Message):
+    """Проверка состояния бота"""
+    result = await check_health(message.bot)
+    
+    text = f"""
+💚 <b>Health Check</b>
+
+Статус: <b>{result['status']}</b>
+🕐 {result['timestamp']}
+
+<b>Проверки:</b>
+🗄️ База данных: <code>{result['checks'].get('database', 'unknown')}</code>
+🤖 Бот: <code>{result['checks'].get('bot', 'unknown')}</code>
+"""
+    await message.answer(text, parse_mode="HTML")
 
 @router.callback_query(lambda c: c.data == "back_to_start")
 async def back_to_start(callback: CallbackQuery):
