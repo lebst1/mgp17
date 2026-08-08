@@ -18,12 +18,12 @@ from src.bot.handlers import (
     subscription_router,
     admin_router,
     save_mode_router,
-    settings_router,
+    # settings_router,  # 👈 ЗАКОММЕНТИРОВАЛИ
 )
 from src.db.session import init_db
 from src.utils.sentry import SentryStub
 
-# 👇 БАЗОВАЯ НАСТРОЙКА ЛОГИРОВАНИЯ
+# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -61,7 +61,7 @@ async def main() -> None:
         dp.include_router(subscription_router)
         dp.include_router(admin_router)
         dp.include_router(save_mode_router)
-        dp.include_router(settings_router)
+        # dp.include_router(settings_router)  # 👈 ЗАКОММЕНТИРОВАЛИ
 
         logger.info(f"🚀 Бот запущен: @{settings.BOT_USERNAME}")
         logger.info(f"👤 Владелец: {settings.OWNER_TELEGRAM_ID}")

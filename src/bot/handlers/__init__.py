@@ -3,8 +3,8 @@ from .profile import router as profile_router
 from .referral import router as referral_router
 from .subscription import router as subscription_router
 from .admin import router as admin_router
-from .save_mode import router as save_mode_router  # 👈 ДОБАВЛЯЕМ
-from .settings import router as settings_router
+from .save_mode import router as save_mode_router
+# from .settings import router as settings_router  # 👈 ЗАКОММЕНТИРОВАЛИ
 
 __all__ = [
     "start_router",
@@ -12,6 +12,6 @@ __all__ = [
     "referral_router",
     "subscription_router",
     "admin_router",
-    "save_mode_router",  # 👈 ДОБАВЛЯЕМ
-    "settings_router",
+    "save_mode_router",
+    # "settings_router",
 ]
