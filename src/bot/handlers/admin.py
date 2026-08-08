@@ -479,58 +479,114 @@ async def show_chats_list(target, user_id: int, page: int = 1):
             await target.answer("❌ Пользователь не найден")
             return
         
-        # Считаем общее количество чатов (без фильтра)
-        total_chats_result = await session.execute(
-            text("""
-                SELECT COUNT(DISTINCT chat_id) 
-                FROM saved_messages 
-                WHERE user_id = :user_id
-            """),
-            {"user_id": user_id}
+        # Проверяем, есть ли бизнес-подключения у пользователя
+        connections = await session.scalars(
+            select(BusinessConnection).where(BusinessConnection.user_id == user_id)
         )
-        total_chats = total_chats_result.scalar() or 0
+        connections = list(connections)
+        
+        # Если есть Business-подключения — показываем их, даже если нет сообщений
+        if connections:
+            # Получаем ВСЕ чаты из бизнес-подключений
+            # Показываем и те, где есть сообщения, и те, где их нет
+            chats_query = text("""
+                SELECT 
+                    sm.chat_id,
+                    MAX(sm.chat_title) as chat_title,
+                    MAX(CASE WHEN sm.from_user_id != :user_id THEN sm.from_username END) as from_username,
+                    MAX(CASE WHEN sm.from_user_id != :user_id THEN sm.from_first_name END) as from_first_name,
+                    COUNT(sm.id) as count,
+                    MAX(sm.saved_at) as last_activity,
+                    SUM(CASE WHEN sm.is_deleted = 1 THEN 1 ELSE 0 END) as deleted_count,
+                    SUM(CASE WHEN sm.is_edited = 1 THEN 1 ELSE 0 END) as edited_count
+                FROM saved_messages sm
+                WHERE sm.user_id = :user_id
+                GROUP BY sm.chat_id
+                ORDER BY last_activity DESC
+                LIMIT :limit OFFSET :offset
+            """)
+            
+            chats = await session.execute(
+                chats_query,
+                {
+                    "user_id": user_id,
+                    "limit": CHATS_PER_PAGE,
+                    "offset": offset
+                }
+            )
+            chats = chats.all()
+            
+            # Считаем общее количество чатов
+            total_chats_result = await session.execute(
+                text("""
+                    SELECT COUNT(DISTINCT chat_id) 
+                    FROM saved_messages 
+                    WHERE user_id = :user_id
+                """),
+                {"user_id": user_id}
+            )
+            total_chats = total_chats_result.scalar() or 0
+            
+            # Если чатов нет в БД, но есть бизнес-подключения — показываем заглушку
+            if total_chats == 0:
+                await target.answer(
+                    f"📭 У пользователя есть бизнес-подключения, но пока нет сохранённых сообщений.\n\n"
+                    f"🔗 Подключений: {len(connections)}\n"
+                    f"💡 Напомните пользователю включить SAVE MODE и проверить подписку.",
+                    parse_mode="HTML"
+                )
+                return
+        else:
+            # Если нет бизнес-подключений — показываем только чаты с сообщениями
+            chats_query = text("""
+                SELECT 
+                    sm.chat_id,
+                    MAX(sm.chat_title) as chat_title,
+                    MAX(CASE WHEN sm.from_user_id != :user_id THEN sm.from_username END) as from_username,
+                    MAX(CASE WHEN sm.from_user_id != :user_id THEN sm.from_first_name END) as from_first_name,
+                    COUNT(sm.id) as count,
+                    MAX(sm.saved_at) as last_activity,
+                    SUM(CASE WHEN sm.is_deleted = 1 THEN 1 ELSE 0 END) as deleted_count,
+                    SUM(CASE WHEN sm.is_edited = 1 THEN 1 ELSE 0 END) as edited_count
+                FROM saved_messages sm
+                WHERE sm.user_id = :user_id
+                GROUP BY sm.chat_id
+                ORDER BY last_activity DESC
+                LIMIT :limit OFFSET :offset
+            """)
+            
+            chats = await session.execute(
+                chats_query,
+                {
+                    "user_id": user_id,
+                    "limit": CHATS_PER_PAGE,
+                    "offset": offset
+                }
+            )
+            chats = chats.all()
+            
+            total_chats_result = await session.execute(
+                text("""
+                    SELECT COUNT(DISTINCT chat_id) 
+                    FROM saved_messages 
+                    WHERE user_id = :user_id
+                """),
+                {"user_id": user_id}
+            )
+            total_chats = total_chats_result.scalar() or 0
+            
+            if not chats:
+                await target.answer("📭 Нет сохранённых чатов у этого пользователя.")
+                return
+        
         total_pages = (total_chats + CHATS_PER_PAGE - 1) // CHATS_PER_PAGE if total_chats > 0 else 1
         
-        offset = (page - 1) * CHATS_PER_PAGE
+        # Формируем информацию о пользователе
+        user_info = f"{user.first_name or user.username or 'Пользователь'}"
+        if user.username:
+            user_info += f" (@{user.username})"
         
-        # Получаем ВСЕ чаты (без фильтра по отправителю)
-        chats_query = text("""
-            SELECT 
-                sm.chat_id,
-                MAX(sm.chat_title) as chat_title,
-                MAX(sm.from_username) as from_username,
-                MAX(sm.from_first_name) as from_first_name,
-                COUNT(sm.id) as count,
-                MAX(sm.saved_at) as last_activity,
-                SUM(CASE WHEN sm.is_deleted = 1 THEN 1 ELSE 0 END) as deleted_count,
-                SUM(CASE WHEN sm.is_edited = 1 THEN 1 ELSE 0 END) as edited_count
-            FROM saved_messages sm
-            WHERE sm.user_id = :user_id
-            GROUP BY sm.chat_id
-            ORDER BY last_activity DESC
-            LIMIT :limit OFFSET :offset
-        """)
-        
-        chats = await session.execute(
-            chats_query,
-            {
-                "user_id": user_id,
-                "limit": CHATS_PER_PAGE,
-                "offset": offset
-            }
-        )
-        chats = chats.all()
-    
-    if not chats:
-        await target.answer("📭 Нет сохранённых чатов у этого пользователя.")
-        return
-    
-    # Формируем информацию о пользователе
-    user_info = f"{user.first_name or user.username or 'Пользователь'}"
-    if user.username:
-        user_info += f" (@{user.username})"
-    
-    result_text = f"""
+        result_text = f"""
 📋 <b>Чаты пользователя</b>
 {user_info}
 🆔 <code>{user.telegram_id}</code>
@@ -539,85 +595,87 @@ async def show_chats_list(target, user_id: int, page: int = 1):
 
 ➖➖➖➖➖➖➖➖➖➖➖➖
 """
-    
-    keyboard_buttons = []
-    now = datetime.now()
-    
-    for i, chat in enumerate(chats, 1):
-        chat_title = chat.chat_title or f"Чат {chat.chat_id}"
         
-        # Определяем имя собеседника
-        contact_name = ""
-        if chat.from_first_name:
-            contact_name = chat.from_first_name
-        if chat.from_username:
-            if contact_name:
-                contact_name += f" (@{chat.from_username})"
-            else:
-                contact_name = f"@{chat.from_username}"
+        keyboard_buttons = []
+        now = datetime.now()
         
-        if not contact_name:
-            contact_name = "Неизвестный"
-        
-        display_name = chat_title[:15] + "..." if len(chat_title) > 15 else chat_title
-        
-        status = ""
-        if chat.deleted_count and chat.deleted_count > 0:
-            status += f"🗑️{chat.deleted_count} "
-        if chat.edited_count and chat.edited_count > 0:
-            status += f"✏️{chat.edited_count} "
-        
-        last_active = ""
-        if chat.last_activity:
-            try:
-                if isinstance(chat.last_activity, str):
-                    from datetime import datetime as dt
-                    last_activity_dt = dt.fromisoformat(chat.last_activity.replace('Z', '+00:00'))
+        for i, chat in enumerate(chats, 1):
+            chat_title = chat.chat_title or f"Чат {chat.chat_id}"
+            
+            # Определяем имя собеседника (НЕ владельца!)
+            contact_name = ""
+            if chat.from_first_name:
+                contact_name = chat.from_first_name
+            if chat.from_username:
+                if contact_name:
+                    contact_name += f" (@{chat.from_username})"
                 else:
-                    last_activity_dt = chat.last_activity
-                
-                diff = now - last_activity_dt
-                if diff.days > 0:
-                    last_active = f" {diff.days}д"
-                elif diff.seconds > 3600:
-                    last_active = f" {diff.seconds//3600}ч"
-                elif diff.seconds > 60:
-                    last_active = f" {diff.seconds//60}м"
+                    contact_name = f"@{chat.from_username}"
+            
+            if not contact_name:
+                if chat_title and chat_title != f"Чат {chat.chat_id}":
+                    contact_name = chat_title
                 else:
-                    last_active = " 🔴"
-            except Exception:
-                last_active = ""
+                    contact_name = f"Чат {chat.chat_id}"
+            
+            display_name = contact_name[:20] + "..." if len(contact_name) > 20 else contact_name
+            
+            status = ""
+            if chat.deleted_count and chat.deleted_count > 0:
+                status += f"🗑️{chat.deleted_count} "
+            if chat.edited_count and chat.edited_count > 0:
+                status += f"✏️{chat.edited_count} "
+            
+            last_active = ""
+            if chat.last_activity:
+                try:
+                    if isinstance(chat.last_activity, str):
+                        from datetime import datetime as dt
+                        last_activity_dt = dt.fromisoformat(chat.last_activity.replace('Z', '+00:00'))
+                    else:
+                        last_activity_dt = chat.last_activity
+                    
+                    diff = now - last_activity_dt
+                    if diff.days > 0:
+                        last_active = f" {diff.days}д"
+                    elif diff.seconds > 3600:
+                        last_active = f" {diff.seconds//3600}ч"
+                    elif diff.seconds > 60:
+                        last_active = f" {diff.seconds//60}м"
+                    else:
+                        last_active = " 🔴"
+                except Exception:
+                    last_active = ""
+            
+            button_text = f"#{i + offset} {display_name} ({chat.count}) {status}{last_active}".strip()
+            
+            keyboard_buttons.append([
+                InlineKeyboardButton(
+                    text=button_text[:60],
+                    callback_data=f"admin_chat_open_{user_id}_{chat.chat_id}"
+                )
+            ])
         
-        # Кнопка
-        button_text = f"#{i + offset} {contact_name} | {display_name} ({chat.count}) {status}{last_active}".strip()
+        # Навигация
+        nav_buttons = []
+        if page > 1:
+            nav_buttons.append(
+                InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin_chats_page_{user_id}_{page-1}")
+            )
+        if page < total_pages:
+            nav_buttons.append(
+                InlineKeyboardButton(text="➡️ Вперед", callback_data=f"admin_chats_page_{user_id}_{page+1}")
+            )
+        if nav_buttons:
+            keyboard_buttons.append(nav_buttons)
         
         keyboard_buttons.append([
-            InlineKeyboardButton(
-                text=button_text[:60],
-                callback_data=f"admin_chat_open_{user_id}_{chat.chat_id}"
-            )
+            InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")
         ])
-    
-    # Навигация
-    nav_buttons = []
-    if page > 1:
-        nav_buttons.append(
-            InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin_chats_page_{user_id}_{page-1}")
-        )
-    if page < total_pages:
-        nav_buttons.append(
-            InlineKeyboardButton(text="➡️ Вперед", callback_data=f"admin_chats_page_{user_id}_{page+1}")
-        )
-    if nav_buttons:
-        keyboard_buttons.append(nav_buttons)
-    
-    keyboard_buttons.append([
-        InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")
-    ])
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-    
-    await target.answer(result_text, reply_markup=keyboard, parse_mode="HTML")
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        
+        await target.answer(result_text, reply_markup=keyboard, parse_mode="HTML")
 
 # ✅ ОТКРЫТЬ КОНКРЕТНЫЙ ЧАТ
 @router.callback_query(lambda c: c.data.startswith("admin_chat_open_"))
