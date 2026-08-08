@@ -116,22 +116,21 @@ async def subscribe_buy_stars(callback: CallbackQuery):
         # Создаем инвойс
         prices = [LabeledPrice(
             label=f"Подписка на {settings.SUBSCRIPTION_DAYS} дней",
-            amount=settings.SUBSCRIPTION_PRICE_STARS * 100  # Telegram работает с копейками
+            amount=settings.SUBSCRIPTION_PRICE_STARS * 100
         )]
         
+        # Для Stars НЕЛЬЗЯ передавать reply_markup с кнопками
+        # Telegram сам добавляет кнопку оплаты
         await callback.bot.send_invoice(
             chat_id=user_id,
             title=f"Подписка SafeSaverX на {settings.SUBSCRIPTION_DAYS} дней",
-            description=f"Доступ ко всем функциям бота на {settings.SUBSCRIPTION_DAYS} дней.\n"
-                        f"Бонусы за рефералов начисляются автоматически.",
+            description=f"Доступ ко всем функциям бота на {settings.SUBSCRIPTION_DAYS} дней.",
             payload=f"subscription_{user_id}_{int(datetime.now().timestamp())}",
             provider_token="",
-            currency="XTR",  # 👈 Ключевой параметр для Stars
+            currency="XTR",
             prices=prices,
             start_parameter="subscription",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔙 Отмена", callback_data="back_to_start")]
-            ])
+            # ❌ НЕ ПЕРЕДАВАЙ reply_markup
         )
         logger.info(f"💳 Создан инвойс для пользователя {user_id}")
         
@@ -139,7 +138,6 @@ async def subscribe_buy_stars(callback: CallbackQuery):
         SentryStub.capture_exception(e, context="subscribe_buy_stars", user_id=user_id)
         logger.exception(f"❌ Ошибка создания инвойса: {e}")
         await callback.message.answer("❌ Ошибка создания платежа. Попробуйте позже.")
-
 
 @router.pre_checkout_query()
 async def pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
