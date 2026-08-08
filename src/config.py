@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     REFERRAL_BONUS_REFERRED_DAYS: int = 1
 
     # Telegram Stars
-    SUBSCRIPTION_PRICE_STARS: int = 100   # 👈 ДОБАВИТЬ
+    SUBSCRIPTION_PRICE_STARS: int = 1  # 👈 ДОБАВИТЬ
     SUBSCRIPTION_DAYS: int = 30           # 👈 ДОБАВИТЬ
 
     class Config:
