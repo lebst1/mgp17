@@ -97,6 +97,7 @@ async def show_admin_panel(target):
 📋 <b>Список пользователей</b> — все пользователи
 💬 <b>Чаты пользователя</b> — просмотр всех чатов
 🗑️ <b>Очистка БД</b> — удалить старые данные
+🗄️ <b>Очистка диска</b> — удалить старые медиа-файлы
 💾 <b>Бэкап</b> — создать бэкап
 💚 <b>Статус</b> — состояние бота
 
@@ -128,6 +129,10 @@ async def show_admin_panel(target):
             InlineKeyboardButton(text="💬 Чаты пользователя", callback_data="admin_chats")
         ],
         [
+            InlineKeyboardButton(text="🗑️ Очистка БД", callback_data="admin_cleanup"),
+            InlineKeyboardButton(text="🗄️ Очистка диска", callback_data="admin_cleanup_disk")  # 👈 НОВАЯ КНОПКА
+        ],
+        [
             InlineKeyboardButton(text="➕ Выдать подписку", callback_data="admin_sub_grant"),
             InlineKeyboardButton(text="➖ Забрать подписку", callback_data="admin_sub_revoke")
         ],
@@ -139,10 +144,7 @@ async def show_admin_panel(target):
             InlineKeyboardButton(text="💳 Платежи", callback_data="admin_payments")
         ],
         [
-            InlineKeyboardButton(text="🗑️ Очистка БД", callback_data="admin_cleanup"),
-            InlineKeyboardButton(text="💾 Бэкап", callback_data="admin_backup")
-        ],
-        [
+            InlineKeyboardButton(text="💾 Бэкап", callback_data="admin_backup"),
             InlineKeyboardButton(text="💚 Статус", callback_data="admin_status")
         ]
     ])
@@ -1615,6 +1617,101 @@ async def admin_cleanup(callback: CallbackQuery):
         await safe_edit_message(callback.message, f"❌ Ошибка очистки: {e}", parse_mode="HTML")
     
     await callback.answer()
+
+@router.callback_query(lambda c: c.data == "admin_cleanup_disk")
+async def admin_cleanup_disk(callback: CallbackQuery):
+    """Очистка диска от старых медиа-файлов"""
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await safe_edit_message(callback.message, "🗄️ <b>Очистка диска...</b>", parse_mode="HTML")
+    await callback.answer()
+    
+    try:
+        # 1. Собираем статистику перед очисткой
+        media_dir = settings.MEDIA_DIR
+        total_size_before = 0
+        total_files_before = 0
+        
+        if os.path.exists(media_dir):
+            for f in os.listdir(media_dir):
+                f_path = os.path.join(media_dir, f)
+                if os.path.isfile(f_path):
+                    total_size_before += os.path.getsize(f_path)
+                    total_files_before += 1
+        
+        # 2. Получаем список файлов, которые есть в БД
+        async with async_session() as session:
+            db_files = await session.scalars(
+                select(SavedMessage.media_path).where(SavedMessage.media_path.isnot(None))
+            )
+            db_files_set = {f for f in db_files if f}
+        
+        # 3. Удаляем файлы, которых нет в БД (осиротевшие)
+        removed_count = 0
+        removed_size = 0
+        
+        if os.path.exists(media_dir):
+            for filename in os.listdir(media_dir):
+                file_path = os.path.join(media_dir, filename)
+                if os.path.isfile(file_path):
+                    # Проверяем, есть ли файл в БД
+                    if file_path not in db_files_set:
+                        try:
+                            removed_size += os.path.getsize(file_path)
+                            os.remove(file_path)
+                            removed_count += 1
+                        except Exception as e:
+                            logger.error(f"❌ Не удалось удалить {file_path}: {e}")
+        
+        # 4. Считаем статистику после очистки
+        total_size_after = 0
+        total_files_after = 0
+        
+        if os.path.exists(media_dir):
+            for f in os.listdir(media_dir):
+                f_path = os.path.join(media_dir, f)
+                if os.path.isfile(f_path):
+                    total_size_after += os.path.getsize(f_path)
+                    total_files_after += 1
+        
+        # 5. Формируем отчет
+        size_before_mb = total_size_before / 1024 / 1024
+        size_after_mb = total_size_after / 1024 / 1024
+        freed_mb = removed_size / 1024 / 1024
+        
+        text = f"""
+🗄️ <b>Очистка диска завершена!</b>
+
+📊 <b>Статистика:</b>
+• Файлов до: <b>{total_files_before}</b>
+• Файлов после: <b>{total_files_after}</b>
+• Удалено файлов: <b>{removed_count}</b>
+
+💾 <b>Освобождено места:</b> <b>{freed_mb:.2f} МБ</b>
+📁 <b>Размер папки до:</b> {size_before_mb:.2f} МБ
+📁 <b>Размер папки после:</b> {size_after_mb:.2f} МБ
+
+✅ <i>Удалены только файлы, которых нет в базе данных.</i>
+"""
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Обновить", callback_data="admin_cleanup_disk")],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
+        ])
+        
+        await safe_edit_message(callback.message, text, keyboard)
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка очистки диска: {e}")
+        await safe_edit_message(
+            callback.message,
+            f"❌ Ошибка очистки диска: {str(e)[:200]}",
+            InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
+            ])
+        )
 
 
 # ✅ БЭКАП
