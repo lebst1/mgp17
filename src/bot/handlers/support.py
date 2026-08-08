@@ -50,7 +50,37 @@ async def support_command(message: Message, state: FSMContext):
 async def support_callback(callback: CallbackQuery, state: FSMContext):
     """Кнопка поддержки из меню"""
     await callback.answer()
-    await support_command(callback.message, state)
+    
+    user = await UserRepository.get_by_id(callback.from_user.id)
+    if not user:
+        await callback.message.answer("❌ Пользователь не найден. Попробуйте /start")
+        return
+    
+    text = """
+🆘 <b>Поддержка SafeSaverX</b>
+
+Опишите вашу проблему или вопрос.
+Мы ответим вам в ближайшее время!
+
+📌 <b>Что можно писать:</b>
+• Проблемы с подключением бота
+• Вопросы по подписке
+• Ошибки и баги
+• Предложения по улучшению
+
+✏️ Напишите ваше сообщение ниже.
+"""
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Отмена", callback_data="back_to_start")],
+    ])
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    
+    await state.set_state(SupportStates.waiting_for_message)
 
 
 @router.message(SupportStates.waiting_for_message)
@@ -59,6 +89,12 @@ async def support_send_message(message: Message, state: FSMContext, bot: Bot):
     user = await UserRepository.get_by_id(message.from_user.id)
     if not user:
         await message.answer("❌ Пользователь не найден")
+        await state.clear()
+        return
+    
+    # Проверяем, не отмена ли это
+    if message.text and message.text.lower() == "/cancel":
+        await message.answer("❌ Отправка отменена.")
         await state.clear()
         return
     
@@ -129,7 +165,7 @@ async def support_reply(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.message(SupportStates.waiting_for_message, StateFilter(SupportStates))
+@router.message(SupportStates.waiting_for_message)
 async def support_reply_send(message: Message, state: FSMContext, bot: Bot):
     """Отправляет ответ пользователю"""
     data = await state.get_data()
@@ -137,6 +173,11 @@ async def support_reply_send(message: Message, state: FSMContext, bot: Bot):
     
     if not user_id:
         await message.answer("❌ Ошибка: пользователь не найден")
+        await state.clear()
+        return
+    
+    if message.text and message.text.lower() == "/cancel":
+        await message.answer("❌ Отправка ответа отменена.")
         await state.clear()
         return
     
