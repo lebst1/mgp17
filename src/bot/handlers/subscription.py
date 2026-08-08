@@ -7,8 +7,10 @@ from datetime import datetime
 from src.config import settings
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.subscription_repository import SubscriptionRepository
-from src.db.models import OrderStatus, PaymentProvider
+from src.db.models import OrderStatus, PaymentProvider, Transaction, TransactionType, TransactionStatus, Payment, User
 from src.db.repositories.payment_repository import PaymentRepository
+from src.db.session import async_session
+from sqlalchemy import select
 from src.utils.sentry import SentryStub
 
 logger = logging.getLogger(__name__)
@@ -56,7 +58,6 @@ def _subscribe_keyboard() -> InlineKeyboardMarkup:
 
 @router.message(Command("subscribe"))
 async def subscribe_info(message: Message):
-    """Информация о подписке (без кнопки купить)"""
     try:
         user = await SubscriptionRepository.get_or_create_subscription(message.from_user.id)
         text = await _build_subscribe_text(user)
@@ -71,9 +72,20 @@ async def subscribe_info(message: Message):
 
 @router.message(Command("pay"))
 async def pay_command(message: Message):
-    """Команда /pay для покупки подписки"""
     try:
         user = await SubscriptionRepository.get_or_create_subscription(message.from_user.id)
+        
+        if user.has_active_subscription():
+            until = user.subscription_until.strftime("%d.%m.%Y %H:%M") if user.subscription_until else "—"
+            days_left = user.get_subscription_info()['days_left']
+            await message.answer(
+                f"✅ У вас уже есть активная подписка!\n\n"
+                f"📅 Действует до: <b>{until}</b>\n"
+                f"📊 Осталось дней: <b>{days_left}</b>",
+                parse_mode="HTML"
+            )
+            return
+        
         text = await _build_subscribe_text(user)
         await message.answer(text, reply_markup=_subscribe_keyboard(), parse_mode="HTML")
     except Exception as e:
@@ -83,7 +95,6 @@ async def pay_command(message: Message):
 
 @router.message(Command("buy"))
 async def buy_command(message: Message):
-    """Старая команда /buy для обратной совместимости"""
     await pay_command(message)
 
 
@@ -92,10 +103,29 @@ async def subscribe_menu_callback(callback: CallbackQuery):
     try:
         user = await SubscriptionRepository.get_or_create_subscription(callback.from_user.id)
         text = await _build_subscribe_text(user)
+        
+        if user.has_active_subscription():
+            until = user.subscription_until.strftime("%d.%m.%Y %H:%M") if user.subscription_until else "—"
+            days_left = user.get_subscription_info()['days_left']
+            text = f"""
+💳 <b>Подписка SafeSaverX</b>
+
+📅 <b>Статус:</b> ✅ Активна
+📆 <b>Действует до:</b> {until}
+📊 <b>Осталось дней:</b> {days_left}
+
+<i>У вас уже есть активная подписка!</i>
+"""
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")],
+            ])
+        else:
+            keyboard = _subscribe_keyboard()
+        
         try:
-            await callback.message.edit_text(text, reply_markup=_subscribe_keyboard(), parse_mode="HTML")
+            await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
         except Exception:
-            await callback.message.answer(text, reply_markup=_subscribe_keyboard(), parse_mode="HTML")
+            await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
         await callback.answer()
     except Exception as e:
         SentryStub.capture_exception(e, context="subscribe_menu_callback", user_id=callback.from_user.id)
@@ -104,7 +134,6 @@ async def subscribe_menu_callback(callback: CallbackQuery):
 
 @router.callback_query(F.data == "subscribe_buy_stars")
 async def subscribe_buy_stars(callback: CallbackQuery):
-    """Создает инвойс для оплаты Telegram Stars"""
     await callback.answer()
     
     user_id = callback.from_user.id
@@ -113,11 +142,21 @@ async def subscribe_buy_stars(callback: CallbackQuery):
         await callback.message.answer("❌ Пользователь не найден")
         return
 
+    if user.has_active_subscription():
+        until = user.subscription_until.strftime("%d.%m.%Y %H:%M") if user.subscription_until else "—"
+        days_left = user.get_subscription_info()['days_left']
+        await callback.message.answer(
+            f"✅ У вас уже есть активная подписка!\n\n"
+            f"📅 Действует до: <b>{until}</b>\n"
+            f"📊 Осталось дней: <b>{days_left}</b>",
+            parse_mode="HTML"
+        )
+        return
+
     try:
-        # Создаем инвойс
         prices = [LabeledPrice(
             label=f"Подписка на {settings.SUBSCRIPTION_DAYS} дней",
-            amount=settings.SUBSCRIPTION_PRICE_STARS * 1
+            amount=settings.SUBSCRIPTION_PRICE_STARS * 100
         )]
         
         await callback.bot.send_invoice(
@@ -140,7 +179,6 @@ async def subscribe_buy_stars(callback: CallbackQuery):
 
 @router.pre_checkout_query()
 async def pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
-    """Подтверждение платежа"""
     try:
         await pre_checkout_query.bot.answer_pre_checkout_query(
             pre_checkout_query.id,
@@ -158,24 +196,15 @@ async def pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
 
 @router.message(F.successful_payment)
 async def successful_payment(message: Message):
-    """Обработка успешного платежа"""
     user_id = message.from_user.id
     payment_info = message.successful_payment
     
     logger.info(f"💳 Успешный платеж от {user_id}: {payment_info}")
 
     try:
-        from src.db.models import OrderStatus, PaymentProvider, Transaction, TransactionType, TransactionStatus, Payment, User
-        from src.db.repositories.payment_repository import PaymentRepository
-        from src.db.repositories.user_repository import UserRepository
-        from src.db.session import async_session
-        from sqlalchemy import select
-        from datetime import datetime
         import json
 
-        # ✅ СОЗДАЕМ ПЛАТЕЖ И ТРАНЗАКЦИЮ ВРУЧНУЮ
         async with async_session() as session:
-            # 1. Создаем платеж
             payment = Payment(
                 user_id=user_id,
                 payment_id=payment_info.provider_payment_charge_id,
@@ -192,7 +221,6 @@ async def successful_payment(message: Message):
             session.add(payment)
             await session.flush()
 
-            # 2. Создаем транзакцию
             tx = Transaction(
                 user_id=user_id,
                 type=TransactionType.SUBSCRIPTION,
@@ -207,7 +235,6 @@ async def successful_payment(message: Message):
             )
             session.add(tx)
 
-            # 3. Продлеваем подписку
             user = await session.scalar(
                 select(User).where(User.telegram_id == user_id)
             )
@@ -223,7 +250,6 @@ async def successful_payment(message: Message):
         if user:
             until = user.subscription_until.strftime("%d.%m.%Y %H:%M") if user.subscription_until else "—"
             
-            # Уведомление пользователю
             await message.answer(
                 f"🎉 <b>Подписка активирована!</b>\n\n"
                 f"✅ Оплачено: {payment_info.total_amount // 100} ⭐\n"
@@ -238,11 +264,9 @@ async def successful_payment(message: Message):
             
             logger.info(f"✅ Подписка активирована для {user_id} на {settings.SUBSCRIPTION_DAYS} дней")
             
-            # ✅ Проверяем реферальный бонус (первая оплата)
             from src.db.repositories.referral_repository import ReferralRepository
             bonus = await ReferralRepository.get_bonus_for_referred(user_id)
             if bonus and bonus.status.value == "held":
-                # Если есть HELD бонус — выпускаем его
                 await ReferralRepository.release_bonus_after_first_payment(
                     referred_id=user_id,
                     payment=payment
