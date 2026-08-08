@@ -477,38 +477,46 @@ async def show_chats_list(target, user_id: int, page: int = 1):
             await target.answer("❌ Пользователь не найден")
             return
         
-        total_chats = await session.scalar(
-            select(func.count()).select_from(SavedMessage)
-            .where(SavedMessage.user_id == user_id)
-            .group_by(SavedMessage.chat_id)
+        # Получаем список чатов с дополнительной информацией
+        chats_query = """
+            SELECT 
+                chat_id,
+                MAX(chat_title) as chat_title,
+                MAX(from_username) as from_username,
+                MAX(from_first_name) as from_first_name,
+                COUNT(id) as count,
+                MAX(saved_at) as last_activity,
+                SUM(CASE WHEN is_deleted = 1 THEN 1 ELSE 0 END) as deleted_count,
+                SUM(CASE WHEN is_edited = 1 THEN 1 ELSE 0 END) as edited_count
+            FROM saved_messages
+            WHERE user_id = :user_id
+            GROUP BY chat_id
+            ORDER BY last_activity DESC
+            LIMIT :limit OFFSET :offset
+        """
+        
+        # Сначала считаем общее количество чатов
+        total_chats_result = await session.execute(
+            text("""
+                SELECT COUNT(DISTINCT chat_id) 
+                FROM saved_messages 
+                WHERE user_id = :user_id
+            """),
+            {"user_id": user_id}
         )
-        total_chats = total_chats or 0
+        total_chats = total_chats_result.scalar() or 0
         total_pages = (total_chats + CHATS_PER_PAGE - 1) // CHATS_PER_PAGE if total_chats > 0 else 1
         
         offset = (page - 1) * CHATS_PER_PAGE
         
-        deleted_count = func.sum(
-            case((SavedMessage.is_deleted == True, 1), else_=0)
-        ).label('deleted_count')
-        
-        edited_count = func.sum(
-            case((SavedMessage.is_edited == True, 1), else_=0)
-        ).label('edited_count')
-        
+        # Получаем чаты с информацией о собеседнике
         chats = await session.execute(
-            select(
-                SavedMessage.chat_id,
-                SavedMessage.chat_title,
-                func.count(SavedMessage.id).label('count'),
-                func.max(SavedMessage.saved_at).label('last_activity'),
-                deleted_count,
-                edited_count
-            )
-            .where(SavedMessage.user_id == user_id)
-            .group_by(SavedMessage.chat_id, SavedMessage.chat_title)
-            .order_by(func.max(SavedMessage.saved_at).desc())
-            .offset(offset)
-            .limit(CHATS_PER_PAGE)
+            text(chats_query),
+            {
+                "user_id": user_id,
+                "limit": CHATS_PER_PAGE,
+                "offset": offset
+            }
         )
         chats = chats.all()
     
@@ -516,6 +524,7 @@ async def show_chats_list(target, user_id: int, page: int = 1):
         await target.answer("📭 Нет сохранённых чатов у этого пользователя.")
         return
     
+    # Формируем информацию о пользователе с username
     user_info = f"{user.first_name or user.username or 'Пользователь'}"
     if user.username:
         user_info += f" (@{user.username})"
@@ -533,16 +542,27 @@ async def show_chats_list(target, user_id: int, page: int = 1):
     keyboard_buttons = []
     
     for i, chat in enumerate(chats, 1):
+        # Название чата
         chat_title = chat.chat_title or f"Чат {chat.chat_id}"
-        if len(chat_title) > 20:
-            chat_title = chat_title[:17] + "..."
         
+        # Информация о собеседнике
+        contact_info = ""
+        if chat.from_username:
+            contact_info = f" @{chat.from_username}"
+        elif chat.from_first_name:
+            contact_info = f" {chat.from_first_name}"
+        
+        # Обрезаем длинные названия
+        display_name = chat_title[:20] + "..." if len(chat_title) > 20 else chat_title
+        
+        # Статус активности
         status = ""
         if chat.deleted_count and chat.deleted_count > 0:
             status += f"🗑️{chat.deleted_count} "
         if chat.edited_count and chat.edited_count > 0:
             status += f"✏️{chat.edited_count} "
         
+        # Время последней активности
         last_active = ""
         if chat.last_activity:
             diff = datetime.now() - chat.last_activity
@@ -555,15 +575,17 @@ async def show_chats_list(target, user_id: int, page: int = 1):
             else:
                 last_active = " 🔴"
         
-        button_text = f"#{i + offset} 💬 {chat_title} ({chat.count}) {status}{last_active}".strip()
+        # Формируем текст кнопки с именем и информацией о собеседнике
+        button_text = f"#{i + offset} {display_name}{contact_info} ({chat.count}) {status}{last_active}".strip()
         
         keyboard_buttons.append([
             InlineKeyboardButton(
-                text=button_text,
+                text=button_text[:60],  # Ограничиваем длину кнопки
                 callback_data=f"admin_chat_open_{user_id}_{chat.chat_id}"
             )
         ])
     
+    # Навигация
     nav_buttons = []
     if page > 1:
         nav_buttons.append(
@@ -583,7 +605,6 @@ async def show_chats_list(target, user_id: int, page: int = 1):
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
     
     await target.answer(text, reply_markup=keyboard, parse_mode="HTML")
-
 
 # ✅ ОТКРЫТЬ КОНКРЕТНЫЙ ЧАТ
 @router.callback_query(lambda c: c.data.startswith("admin_chat_open_"))
