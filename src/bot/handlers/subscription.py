@@ -165,24 +165,61 @@ async def successful_payment(message: Message):
     logger.info(f"💳 Успешный платеж от {user_id}: {payment_info}")
 
     try:
-        # ✅ СОХРАНЯЕМ ПЛАТЕЖ В БД
-        await PaymentRepository.create(
-            user_id=user_id,
-            payment_id=payment_info.provider_payment_charge_id,
-            amount=payment_info.total_amount // 100,
-            status=OrderStatus.PAID,
-            provider=PaymentProvider.STARS,
-            currency="XTR",
-            description=f"Подписка на {settings.SUBSCRIPTION_DAYS} дней через Stars",
-            provider_raw={"telegram_payment": payment_info.model_dump()}
-        )
+        from src.db.models import OrderStatus, PaymentProvider, Transaction, TransactionType, TransactionStatus, Payment, User
+        from src.db.repositories.payment_repository import PaymentRepository
+        from src.db.repositories.user_repository import UserRepository
+        from src.db.session import async_session
+        from sqlalchemy import select
+        from datetime import datetime
+        import json
 
-        # Начисляем подписку
-        user = await UserRepository.extend_subscription(
-            user_id,
-            settings.SUBSCRIPTION_DAYS
-        )
-        
+        # ✅ СОЗДАЕМ ПЛАТЕЖ И ТРАНЗАКЦИЮ ВРУЧНУЮ
+        async with async_session() as session:
+            # 1. Создаем платеж
+            payment = Payment(
+                user_id=user_id,
+                payment_id=payment_info.provider_payment_charge_id,
+                amount=payment_info.total_amount // 100,
+                status=OrderStatus.PAID,
+                provider=PaymentProvider.STARS,
+                currency="XTR",
+                description=f"Подписка на {settings.SUBSCRIPTION_DAYS} дней через Stars",
+                provider_raw=json.dumps({"telegram_payment": payment_info.model_dump()}),
+                paid_at=datetime.utcnow(),
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            )
+            session.add(payment)
+            await session.flush()
+
+            # 2. Создаем транзакцию
+            tx = Transaction(
+                user_id=user_id,
+                type=TransactionType.SUBSCRIPTION,
+                status=TransactionStatus.COMPLETED,
+                amount=payment.amount,
+                days_credited=settings.SUBSCRIPTION_DAYS,
+                payment_id=payment.id,
+                description=f"Подписка на {settings.SUBSCRIPTION_DAYS} дней через Stars",
+                completed_at=datetime.utcnow(),
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            )
+            session.add(tx)
+
+            # 3. Продлеваем подписку
+            user = await session.scalar(
+                select(User).where(User.telegram_id == user_id)
+            )
+            if user:
+                user.extend_subscription(settings.SUBSCRIPTION_DAYS)
+                user.updated_at = datetime.utcnow()
+            else:
+                await message.answer("❌ Пользователь не найден")
+                return
+
+            await session.commit()
+
         if user:
             until = user.subscription_until.strftime("%d.%m.%Y %H:%M") if user.subscription_until else "—"
             
@@ -204,19 +241,17 @@ async def successful_payment(message: Message):
             # ✅ Проверяем реферальный бонус (первая оплата)
             from src.db.repositories.referral_repository import ReferralRepository
             bonus = await ReferralRepository.get_bonus_for_referred(user_id)
-            if bonus and bonus.status == "held":
+            if bonus and bonus.status.value == "held":
                 # Если есть HELD бонус — выпускаем его
-                payment = await PaymentRepository.get_by_payment_id(payment_info.provider_payment_charge_id)
-                if payment:
-                    await ReferralRepository.release_bonus_after_first_payment(
-                        referred_id=user_id,
-                        payment=payment
-                    )
-                    await message.answer(
-                        "🎁 <b>Реферальный бонус активирован!</b>\n\n"
-                        "Вам и вашему рефереру начислены бонусные дни! 🚀",
-                        parse_mode="HTML"
-                    )
+                await ReferralRepository.release_bonus_after_first_payment(
+                    referred_id=user_id,
+                    payment=payment
+                )
+                await message.answer(
+                    "🎁 <b>Реферальный бонус активирован!</b>\n\n"
+                    "Вам и вашему рефереру начислены бонусные дни! 🚀",
+                    parse_mode="HTML"
+                )
         else:
             await message.answer("❌ Ошибка активации подписки. Обратитесь в поддержку.")
             
