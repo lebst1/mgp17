@@ -539,6 +539,7 @@ async def show_chats_list(target, user_id: int, page: int = 1):
 """
     
     keyboard_buttons = []
+    now = datetime.now()
     
     for i, chat in enumerate(chats, 1):
         # Название чата
@@ -561,18 +562,28 @@ async def show_chats_list(target, user_id: int, page: int = 1):
         if chat.edited_count and chat.edited_count > 0:
             status += f"✏️{chat.edited_count} "
         
-        # Время последней активности
+        # Время последней активности (конвертируем строку в datetime)
         last_active = ""
         if chat.last_activity:
-            diff = datetime.now() - chat.last_activity
-            if diff.days > 0:
-                last_active = f" {diff.days}д"
-            elif diff.seconds > 3600:
-                last_active = f" {diff.seconds//3600}ч"
-            elif diff.seconds > 60:
-                last_active = f" {diff.seconds//60}м"
-            else:
-                last_active = " 🔴"
+            try:
+                # Если last_activity строка — конвертируем
+                if isinstance(chat.last_activity, str):
+                    from datetime import datetime as dt
+                    last_activity_dt = dt.fromisoformat(chat.last_activity.replace('Z', '+00:00'))
+                else:
+                    last_activity_dt = chat.last_activity
+                
+                diff = now - last_activity_dt
+                if diff.days > 0:
+                    last_active = f" {diff.days}д"
+                elif diff.seconds > 3600:
+                    last_active = f" {diff.seconds//3600}ч"
+                elif diff.seconds > 60:
+                    last_active = f" {diff.seconds//60}м"
+                else:
+                    last_active = " 🔴"
+            except Exception:
+                last_active = ""
         
         # Формируем текст кнопки с именем и информацией о собеседнике
         button_text = f"#{i + offset} {display_name}{contact_info} ({chat.count}) {status}{last_active}".strip()
