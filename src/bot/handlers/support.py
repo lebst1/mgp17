@@ -1,6 +1,6 @@
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters import Command, StateFilter
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
@@ -13,6 +13,7 @@ router = Router()
 
 class SupportStates(StatesGroup):
     waiting_for_message = State()
+    waiting_for_reply = State()  # 👈 Новое состояние для ответа
 
 
 @router.message(Command("support"))
@@ -92,7 +93,6 @@ async def support_send_message(message: Message, state: FSMContext, bot: Bot):
         await state.clear()
         return
     
-    # Проверяем, не отмена ли это
     if message.text and message.text.lower() == "/cancel":
         await message.answer("❌ Отправка отменена.")
         await state.clear()
@@ -126,7 +126,6 @@ async def support_send_message(message: Message, state: FSMContext, bot: Bot):
         ]
     ])
     
-    # Отправляем владельцу
     try:
         await bot.send_message(
             chat_id=settings.OWNER_TELEGRAM_ID,
@@ -155,7 +154,7 @@ async def support_reply(callback: CallbackQuery, state: FSMContext):
     user_id = int(callback.data.split("_")[-1])
     
     await state.update_data(reply_user_id=user_id)
-    await state.set_state(SupportStates.waiting_for_message)
+    await state.set_state(SupportStates.waiting_for_reply)
     
     await callback.message.answer(
         f"✏️ Введите ответ для пользователя <code>{user_id}</code>:\n\n"
@@ -165,7 +164,7 @@ async def support_reply(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.message(SupportStates.waiting_for_message)
+@router.message(SupportStates.waiting_for_reply)
 async def support_reply_send(message: Message, state: FSMContext, bot: Bot):
     """Отправляет ответ пользователю"""
     data = await state.get_data()
@@ -182,16 +181,26 @@ async def support_reply_send(message: Message, state: FSMContext, bot: Bot):
         return
     
     try:
+        # ✅ Отправляем ответ ПОЛЬЗОВАТЕЛЮ
         await bot.send_message(
             chat_id=user_id,
             text=f"📩 <b>Ответ поддержки</b>\n\n{message.text}",
             parse_mode="HTML"
         )
         
+        # ✅ Отправляем уведомление ВЛАДЕЛЬЦУ, что ответ отправлен
         await message.answer(
             f"✅ Ответ отправлен пользователю <code>{user_id}</code>",
             parse_mode="HTML"
         )
+        
+        # ✅ Отправляем владельцу подтверждение
+        await bot.send_message(
+            chat_id=settings.OWNER_TELEGRAM_ID,
+            text=f"✅ Ответ отправлен пользователю <code>{user_id}</code>\n\n📩 <b>Текст ответа:</b>\n<blockquote>{message.text}</blockquote>",
+            parse_mode="HTML"
+        )
+        
         await state.clear()
         
     except Exception as e:
