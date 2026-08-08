@@ -156,7 +156,7 @@ async def subscribe_buy_stars(callback: CallbackQuery):
     try:
         prices = [LabeledPrice(
             label=f"Подписка на {settings.SUBSCRIPTION_DAYS} дней",
-            amount=settings.SUBSCRIPTION_PRICE_STARS * 100
+            amount=settings.SUBSCRIPTION_PRICE_STARS * 1
         )]
         
         await callback.bot.send_invoice(
