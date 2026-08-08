@@ -18,11 +18,12 @@ from src.bot.handlers import (
     subscription_router,
     admin_router,
     save_mode_router,
-    support_router,  # 👈 ДОБАВЛЯЕМ
+    support_router,
 )
 from src.business_bot.handlers import router as business_router
 from src.db.session import init_db
 from src.utils.sentry import SentryStub
+from src.services.subscription_checker import subscription_checker_loop  # 👈 ДОБАВЛЯЕМ
 
 # Настройка логирования
 logging.basicConfig(
@@ -62,11 +63,15 @@ async def main() -> None:
         dp.include_router(subscription_router)
         dp.include_router(admin_router)
         dp.include_router(save_mode_router)
-        dp.include_router(support_router)  # 👈 ДОБАВЛЯЕМ
+        dp.include_router(support_router)
         dp.include_router(business_router)
 
         logger.info(f"🚀 Бот запущен: @{settings.BOT_USERNAME}")
         logger.info(f"👤 Владелец: {settings.OWNER_TELEGRAM_ID}")
+
+        # 👇 ЗАПУСКАЕМ ФОНОВУЮ ПРОВЕРКУ ПОДПИСОК
+        asyncio.create_task(subscription_checker_loop(bot))
+        logger.info("✅ Фоновый сервис проверки подписок запущен")
 
         await dp.start_polling(bot)
 
