@@ -1,10 +1,13 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from src.config import settings
 from src.db.repositories.user_repository import UserRepository
-from src.db.models import ReferralBonusStatus
+from src.db.models import ReferralBonusStatus, User
+from src.db.session import async_session
 
 router = Router()
 
@@ -19,10 +22,9 @@ async def build_profile_text(user) -> str:
     sub = user.get_subscription_info()
     until = _format_date(sub["subscription_until"])
 
-    # Подсчет рефералов через связь direct_referrals
+    # Данные уже загружены через selectinload, безопасно используем
     referrals_count = len(user.direct_referrals) if user.direct_referrals else 0
     
-    # Подсчет заработанных дней через бонусы (только выпущенные)
     referral_days_earned = 0
     if user.bonuses_as_referrer:
         for bonus in user.bonuses_as_referrer:
@@ -56,14 +58,38 @@ def profile_keyboard() -> InlineKeyboardMarkup:
 
 @router.message(Command("profile"))
 async def profile_command(message: Message):
-    user = await UserRepository.get_by_id(message.from_user.id)
-    if not user:
-        user, _ = await UserRepository.get_or_create(
-            telegram_id=message.from_user.id,
-            username=message.from_user.username,
-            first_name=message.from_user.first_name,
-            last_name=message.from_user.last_name,
+    user_id = message.from_user.id
+    
+    async with async_session() as session:
+        # Загружаем пользователя вместе с нужными связями
+        result = await session.execute(
+            select(User)
+            .where(User.telegram_id == user_id)
+            .options(
+                selectinload(User.direct_referrals),
+                selectinload(User.bonuses_as_referrer)
+            )
         )
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            # Если пользователь не найден — создаем через репозиторий
+            user, _ = await UserRepository.get_or_create(
+                telegram_id=user_id,
+                username=message.from_user.username,
+                first_name=message.from_user.first_name,
+                last_name=message.from_user.last_name,
+            )
+            # Перезагружаем с нужными связями
+            result = await session.execute(
+                select(User)
+                .where(User.telegram_id == user_id)
+                .options(
+                    selectinload(User.direct_referrals),
+                    selectinload(User.bonuses_as_referrer)
+                )
+            )
+            user = result.scalar_one()
 
     text = await build_profile_text(user)
     await message.answer(text, reply_markup=profile_keyboard(), parse_mode="HTML")
@@ -71,10 +97,22 @@ async def profile_command(message: Message):
 
 @router.callback_query(F.data == "profile_menu")
 async def profile_callback(callback: CallbackQuery):
-    user = await UserRepository.get_by_id(callback.from_user.id)
-    if not user:
-        await callback.answer("❌ Пользователь не найден", show_alert=True)
-        return
+    user_id = callback.from_user.id
+    
+    async with async_session() as session:
+        result = await session.execute(
+            select(User)
+            .where(User.telegram_id == user_id)
+            .options(
+                selectinload(User.direct_referrals),
+                selectinload(User.bonuses_as_referrer)
+            )
+        )
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            await callback.answer("❌ Пользователь не найден", show_alert=True)
+            return
 
     text = await build_profile_text(user)
     try:
