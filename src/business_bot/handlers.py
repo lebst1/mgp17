@@ -38,16 +38,18 @@ async def download_media(bot: Bot, file_id: str) -> str:
 
 
 async def send_deleted_notification(bot: Bot, user_id: int, saved_msg):
-    username = saved_msg.from_username or 'пользователь'
-    text = f"""<b>{username}</b>
-
-🗑 удалил сообщение.
-
-{saved_msg.text or 'Медиа'}
-
-— — — — — — — — — — — — — — — — — — — —
-💬 {saved_msg.chat_title or 'Личный чат'}"""
+    username = saved_msg.from_username or saved_msg.from_first_name or "пользователь"
     
+    # Формируем текст
+    text = f"""
+🗑️ <b>{username}</b> удалил сообщение.
+
+<blockquote>{saved_msg.text or 'Медиафайл'}</blockquote>
+
+💬 {saved_msg.chat_title or 'Личный чат'}
+"""
+    
+    # Проверяем, есть ли медиа
     media_path = saved_msg.media_path
     if media_path and os.path.exists(media_path):
         try:
@@ -75,20 +77,26 @@ async def send_deleted_notification(bot: Bot, user_id: int, saved_msg):
         except Exception as e:
             logger.error(f"❌ Ошибка отправки медиа: {e}")
     
+    # Если медиа нет или ошибка — отправляем только текст
     await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
 
-
 async def send_edit_notification(bot: Bot, user_id: int, saved_msg, old_text: str, new_text: str):
-    username = saved_msg.from_username or 'пользователь'
-    text = f"""<b>{username}</b>
-
-✏️ отредактировал сообщение.
-
-{new_text}
-
-— — — — — — — — — — — — — — — — — — — —
-💬 {saved_msg.chat_title or 'Личный чат'}"""
+    username = saved_msg.from_username or saved_msg.from_first_name or "пользователь"
     
+    # Формируем текст с блок-цитатами
+    text = f"""
+✏️ <b>{username}</b> отредактировал сообщение.
+
+<blockquote>{old_text or 'Без текста'}</blockquote>
+
+↓↓↓
+
+<blockquote>{new_text or 'Без текста'}</blockquote>
+
+💬 {saved_msg.chat_title or 'Личный чат'}
+"""
+    
+    # Проверяем, есть ли медиа
     media_path = saved_msg.media_path
     if media_path and os.path.exists(media_path):
         try:
@@ -113,8 +121,8 @@ async def send_edit_notification(bot: Bot, user_id: int, saved_msg, old_text: st
         except Exception as e:
             logger.error(f"❌ Ошибка отправки медиа с правкой: {e}")
     
+    # Если медиа нет или ошибка — отправляем только текст
     await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
-
 
 @router.business_connection()
 async def handle_business_connection(event: BusinessConnection, bot: Bot):
