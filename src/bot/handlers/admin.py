@@ -477,7 +477,7 @@ async def show_chats_list(target, user_id: int, page: int = 1):
             await target.answer("❌ Пользователь не найден")
             return
         
-        # Сначала считаем общее количество чатов
+        # Считаем общее количество чатов (без фильтра)
         total_chats_result = await session.execute(
             text("""
                 SELECT COUNT(DISTINCT chat_id) 
@@ -491,7 +491,7 @@ async def show_chats_list(target, user_id: int, page: int = 1):
         
         offset = (page - 1) * CHATS_PER_PAGE
         
-        # Получаем чаты с информацией о собеседнике (НЕ владельце)
+        # Получаем ВСЕ чаты (без фильтра по отправителю)
         chats_query = text("""
             SELECT 
                 sm.chat_id,
@@ -504,7 +504,6 @@ async def show_chats_list(target, user_id: int, page: int = 1):
                 SUM(CASE WHEN sm.is_edited = 1 THEN 1 ELSE 0 END) as edited_count
             FROM saved_messages sm
             WHERE sm.user_id = :user_id
-            AND sm.from_user_id != :user_id  -- 👈 ИСКЛЮЧАЕМ СООБЩЕНИЯ ОТ ВЛАДЕЛЬЦА
             GROUP BY sm.chat_id
             ORDER BY last_activity DESC
             LIMIT :limit OFFSET :offset
@@ -521,10 +520,10 @@ async def show_chats_list(target, user_id: int, page: int = 1):
         chats = chats.all()
     
     if not chats:
-        await target.answer("📭 Нет сохранённых чатов с собеседниками у этого пользователя.")
+        await target.answer("📭 Нет сохранённых чатов у этого пользователя.")
         return
     
-    # Формируем информацию о пользователе с username
+    # Формируем информацию о пользователе
     user_info = f"{user.first_name or user.username or 'Пользователь'}"
     if user.username:
         user_info += f" (@{user.username})"
@@ -543,37 +542,29 @@ async def show_chats_list(target, user_id: int, page: int = 1):
     now = datetime.now()
     
     for i, chat in enumerate(chats, 1):
-        # Название чата (если нет — используем ID)
         chat_title = chat.chat_title or f"Чат {chat.chat_id}"
         
-        # Имя собеседника (из from_username / from_first_name)
+        # Определяем имя собеседника
         contact_name = ""
         if chat.from_first_name:
             contact_name = chat.from_first_name
-        elif chat.from_username:
-            contact_name = f"@{chat.from_username}"
+        if chat.from_username:
+            if contact_name:
+                contact_name += f" (@{chat.from_username})"
+            else:
+                contact_name = f"@{chat.from_username}"
         
-        # Если есть username — добавляем его в скобках
-        if chat.from_username and chat.from_first_name:
-            contact_name = f"{chat.from_first_name} (@{chat.from_username})"
-        elif chat.from_username:
-            contact_name = f"@{chat.from_username}"
-        
-        # Если имя не найдено — пишем "Неизвестный"
         if not contact_name:
             contact_name = "Неизвестный"
         
-        # Обрезаем длинные названия чата
         display_name = chat_title[:15] + "..." if len(chat_title) > 15 else chat_title
         
-        # Статус активности
         status = ""
         if chat.deleted_count and chat.deleted_count > 0:
             status += f"🗑️{chat.deleted_count} "
         if chat.edited_count and chat.edited_count > 0:
             status += f"✏️{chat.edited_count} "
         
-        # Время последней активности
         last_active = ""
         if chat.last_activity:
             try:
@@ -595,7 +586,7 @@ async def show_chats_list(target, user_id: int, page: int = 1):
             except Exception:
                 last_active = ""
         
-        # Формируем текст кнопки
+        # Кнопка
         button_text = f"#{i + offset} {contact_name} | {display_name} ({chat.count}) {status}{last_active}".strip()
         
         keyboard_buttons.append([
