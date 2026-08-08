@@ -491,20 +491,21 @@ async def show_chats_list(target, user_id: int, page: int = 1):
         
         offset = (page - 1) * CHATS_PER_PAGE
         
-        # Получаем чаты с информацией о собеседнике
+        # Получаем чаты с информацией о собеседнике (НЕ владельце)
         chats_query = text("""
             SELECT 
-                chat_id,
-                MAX(chat_title) as chat_title,
-                MAX(from_username) as from_username,
-                MAX(from_first_name) as from_first_name,
-                COUNT(id) as count,
-                MAX(saved_at) as last_activity,
-                SUM(CASE WHEN is_deleted = 1 THEN 1 ELSE 0 END) as deleted_count,
-                SUM(CASE WHEN is_edited = 1 THEN 1 ELSE 0 END) as edited_count
-            FROM saved_messages
-            WHERE user_id = :user_id
-            GROUP BY chat_id
+                sm.chat_id,
+                MAX(sm.chat_title) as chat_title,
+                MAX(sm.from_username) as from_username,
+                MAX(sm.from_first_name) as from_first_name,
+                COUNT(sm.id) as count,
+                MAX(sm.saved_at) as last_activity,
+                SUM(CASE WHEN sm.is_deleted = 1 THEN 1 ELSE 0 END) as deleted_count,
+                SUM(CASE WHEN sm.is_edited = 1 THEN 1 ELSE 0 END) as edited_count
+            FROM saved_messages sm
+            WHERE sm.user_id = :user_id
+            AND sm.from_user_id != :user_id  -- 👈 ИСКЛЮЧАЕМ СООБЩЕНИЯ ОТ ВЛАДЕЛЬЦА
+            GROUP BY sm.chat_id
             ORDER BY last_activity DESC
             LIMIT :limit OFFSET :offset
         """)
@@ -520,7 +521,7 @@ async def show_chats_list(target, user_id: int, page: int = 1):
         chats = chats.all()
     
     if not chats:
-        await target.answer("📭 Нет сохранённых чатов у этого пользователя.")
+        await target.answer("📭 Нет сохранённых чатов с собеседниками у этого пользователя.")
         return
     
     # Формируем информацию о пользователе с username
@@ -542,18 +543,28 @@ async def show_chats_list(target, user_id: int, page: int = 1):
     now = datetime.now()
     
     for i, chat in enumerate(chats, 1):
-        # Название чата
+        # Название чата (если нет — используем ID)
         chat_title = chat.chat_title or f"Чат {chat.chat_id}"
         
-        # Информация о собеседнике
-        contact_info = ""
-        if chat.from_username:
-            contact_info = f" @{chat.from_username}"
-        elif chat.from_first_name:
-            contact_info = f" {chat.from_first_name}"
+        # Имя собеседника (из from_username / from_first_name)
+        contact_name = ""
+        if chat.from_first_name:
+            contact_name = chat.from_first_name
+        elif chat.from_username:
+            contact_name = f"@{chat.from_username}"
         
-        # Обрезаем длинные названия
-        display_name = chat_title[:20] + "..." if len(chat_title) > 20 else chat_title
+        # Если есть username — добавляем его в скобках
+        if chat.from_username and chat.from_first_name:
+            contact_name = f"{chat.from_first_name} (@{chat.from_username})"
+        elif chat.from_username:
+            contact_name = f"@{chat.from_username}"
+        
+        # Если имя не найдено — пишем "Неизвестный"
+        if not contact_name:
+            contact_name = "Неизвестный"
+        
+        # Обрезаем длинные названия чата
+        display_name = chat_title[:15] + "..." if len(chat_title) > 15 else chat_title
         
         # Статус активности
         status = ""
@@ -562,11 +573,10 @@ async def show_chats_list(target, user_id: int, page: int = 1):
         if chat.edited_count and chat.edited_count > 0:
             status += f"✏️{chat.edited_count} "
         
-        # Время последней активности (конвертируем строку в datetime)
+        # Время последней активности
         last_active = ""
         if chat.last_activity:
             try:
-                # Если last_activity строка — конвертируем
                 if isinstance(chat.last_activity, str):
                     from datetime import datetime as dt
                     last_activity_dt = dt.fromisoformat(chat.last_activity.replace('Z', '+00:00'))
@@ -585,12 +595,12 @@ async def show_chats_list(target, user_id: int, page: int = 1):
             except Exception:
                 last_active = ""
         
-        # Формируем текст кнопки с именем и информацией о собеседнике
-        button_text = f"#{i + offset} {display_name}{contact_info} ({chat.count}) {status}{last_active}".strip()
+        # Формируем текст кнопки
+        button_text = f"#{i + offset} {contact_name} | {display_name} ({chat.count}) {status}{last_active}".strip()
         
         keyboard_buttons.append([
             InlineKeyboardButton(
-                text=button_text[:60],  # Ограничиваем длину кнопки
+                text=button_text[:60],
                 callback_data=f"admin_chat_open_{user_id}_{chat.chat_id}"
             )
         ])
