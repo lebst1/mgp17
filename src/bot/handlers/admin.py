@@ -18,6 +18,8 @@ import os
 import logging
 from datetime import datetime, timedelta
 import pytz
+from src.db.models import User, SavedMessage, BusinessConnection, Payment, ReferralBonus, PaymentProvider, OrderStatus
+
 
 logger = logging.getLogger(__name__)
 
@@ -1900,29 +1902,75 @@ async def admin_payments(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
 
-    pay_stats = await PaymentRepository.get_stats()
-    payments = await PaymentRepository.get_recent(15)
-
-    text = f"""
+    try:
+        async with async_session() as session:
+            # Получаем все платежи из таблицы payments
+            payments = await session.scalars(
+                select(Payment).order_by(Payment.created_at.desc()).limit(50)
+            )
+            payments = list(payments)
+            
+            # Статистика
+            total = len(payments)
+            paid = sum(1 for p in payments if p.status == OrderStatus.PAID)
+            total_amount = sum(float(p.amount) for p in payments if p.status == OrderStatus.PAID)
+            
+            text = f"""
 💳 <b>Платежи</b>
 
-Всего: {pay_stats.get('total_payments', 0)}
-Успешных: {pay_stats.get('paid_payments', 0)}
-Сумма: {pay_stats.get('total_amount', 0):.0f}₽
+Всего: {total}
+✅ Успешных: {paid}
+💰 Сумма: {total_amount:.0f} {"⭐" if any(p.provider == PaymentProvider.STARS for p in payments) else "₽"}
 
-<b>Последние:</b>
+<b>Последние платежи:</b>
 """
-    if not payments:
-        text += "Платежей пока нет."
-    else:
-        for p in payments:
-            text += f"• <code>{p.payment_id[:12]}...</code> | {p.user_id} | {p.amount}₽ | {p.status}\n"
-
-    await safe_edit_message(
-        callback.message,
-        text,
-        InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
-        ]),
-    )
+            
+            if not payments:
+                text += "Платежей пока нет."
+            else:
+                for p in payments[:15]:
+                    # Определяем валюту
+                    currency = "⭐" if p.provider == PaymentProvider.STARS else "₽"
+                    
+                    # Статус
+                    status_icon = {
+                        OrderStatus.PAID: "✅",
+                        OrderStatus.PENDING: "⏳",
+                        OrderStatus.FAILED: "❌",
+                        OrderStatus.REFUNDED: "↩️",
+                    }.get(p.status, "❔")
+                    
+                    # Провайдер
+                    provider_name = {
+                        PaymentProvider.YOOKASSA: "ЮKassa",
+                        PaymentProvider.STRIPE: "Stripe",
+                        PaymentProvider.STARS: "⭐ Stars",
+                    }.get(p.provider, p.provider.value if p.provider else "—")
+                    
+                    # Форматируем дату
+                    date_str = p.created_at.strftime("%d.%m %H:%M") if p.created_at else "—"
+                    
+                    text += (
+                        f"• {status_icon} <code>{p.payment_id[:12]}...</code> "
+                        f"| {p.user_id} | {p.amount:.0f}{currency} "
+                        f"| {provider_name} | {date_str}\n"
+                    )
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Обновить", callback_data="admin_payments")],
+                [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
+            ])
+            
+            await safe_edit_message(callback.message, text, keyboard)
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка загрузки платежей: {e}")
+        await safe_edit_message(
+            callback.message,
+            f"❌ Ошибка загрузки платежей: {e}",
+            InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back")]
+            ])
+        )
+    
     await callback.answer()
