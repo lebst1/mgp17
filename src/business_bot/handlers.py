@@ -40,7 +40,6 @@ async def download_media(bot: Bot, file_id: str) -> str:
 async def send_deleted_notification(bot: Bot, user_id: int, saved_msg):
     username = saved_msg.from_username or saved_msg.from_first_name or "пользователь"
     
-    # Формируем текст
     text = f"""
 🗑️ <b>{username}</b> удалил сообщение.
 
@@ -49,7 +48,6 @@ async def send_deleted_notification(bot: Bot, user_id: int, saved_msg):
 💬 {saved_msg.chat_title or 'Личный чат'}
 """
     
-    # Проверяем, есть ли медиа
     media_path = saved_msg.media_path
     if media_path and os.path.exists(media_path):
         try:
@@ -77,13 +75,12 @@ async def send_deleted_notification(bot: Bot, user_id: int, saved_msg):
         except Exception as e:
             logger.error(f"❌ Ошибка отправки медиа: {e}")
     
-    # Если медиа нет или ошибка — отправляем только текст
     await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
+
 
 async def send_edit_notification(bot: Bot, user_id: int, saved_msg, old_text: str, new_text: str):
     username = saved_msg.from_username or saved_msg.from_first_name or "пользователь"
     
-    # Формируем текст с блок-цитатами
     text = f"""
 ✏️ <b>{username}</b> отредактировал сообщение.
 
@@ -96,7 +93,6 @@ async def send_edit_notification(bot: Bot, user_id: int, saved_msg, old_text: st
 💬 {saved_msg.chat_title or 'Личный чат'}
 """
     
-    # Проверяем, есть ли медиа
     media_path = saved_msg.media_path
     if media_path and os.path.exists(media_path):
         try:
@@ -121,8 +117,8 @@ async def send_edit_notification(bot: Bot, user_id: int, saved_msg, old_text: st
         except Exception as e:
             logger.error(f"❌ Ошибка отправки медиа с правкой: {e}")
     
-    # Если медиа нет или ошибка — отправляем только текст
     await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
+
 
 @router.business_connection()
 async def handle_business_connection(event: BusinessConnection, bot: Bot):
@@ -146,25 +142,14 @@ async def handle_business_connection(event: BusinessConnection, bot: Bot):
         is_enabled=event.is_enabled
     )
     
-    # ✅ ПРОВЕРКА ПОДПИСКИ ПРИ ПОДКЛЮЧЕНИИ
-    if user.has_active_subscription():
-        await bot.send_message(
-            chat_id=user_id,
-            text="✅ Ваш бизнес-аккаунт подключен к SafeSaverX!\n\n"
-                 "Теперь я буду сохранять удаленные и отредактированные сообщения.\n"
-                 "Чтобы проверить статус, отправьте /business_status"
-        )
-        logger.info(f"✅ Отправлено приветствие пользователю {user_id}")
-    else:
-        await bot.send_message(
-            chat_id=user_id,
-            text="⚠️ <b>Подписка неактивна</b>\n\n"
-                 "Вы подключили бота к бизнес-аккаунту, но для работы требуется подписка.\n\n"
-                 "💰 Купить подписку: /buy\n"
-                 "📋 Подробнее: /subscribe",
-            parse_mode="HTML"
-        )
-        logger.info(f"ℹ️ Пользователь {user_id} подключил бота без подписки")
+    # Отправляем приветствие (без проверки подписки)
+    await bot.send_message(
+        chat_id=user_id,
+        text="✅ Ваш бизнес-аккаунт подключен к SafeSaverX!\n\n"
+             "Теперь я буду сохранять удаленные и отредактированные сообщения.\n"
+             "Чтобы проверить статус, отправьте /business_status"
+    )
+    logger.info(f"✅ Отправлено приветствие пользователю {user_id}")
 
 
 @router.business_message()
@@ -193,12 +178,7 @@ async def handle_business_message(message: Message):
             logger.warning(f"⚠️ Пользователь {message.from_user.id} не найден")
             return
     
-    # ✅ ПРОВЕРКА ПОДПИСКИ
-    if not user.has_active_subscription():
-        logger.info(f"⛔ Сообщение проигнорировано: у пользователя {user.telegram_id} нет подписки")
-        return
-    
-    # ✅ ПРОВЕРКА SAVEMODE
+    # ✅ ПРОВЕРКА SAVEMODE (без проверки подписки)
     if not user.savemode_enabled:
         logger.info(f"ℹ️ SAVEMODE выключен для пользователя {user.telegram_id}")
         return
@@ -292,8 +272,14 @@ async def handle_business_message(message: Message):
             message_data["media_type"] = media_type
             message_data["media_size"] = media_size
         
-        await MessageRepository.save_message(message_data)
+        # Сохраняем сообщение
+        saved_msg = await MessageRepository.save_message(message_data)
         logger.info(f"💾 Сохранено сообщение от {user.telegram_id} в чате {message.chat.id}")
+        
+        # ✅ НОВОЕ: отправка медиа владельцу в сортировочные чаты
+        if media_path:
+            from src.business_bot.media_sorter import sort_and_send_media
+            await sort_and_send_media(message.bot, user.telegram_id, saved_msg)
         
     except Exception as e:
         logger.error(f"❌ Ошибка сохранения сообщения: {e}")
@@ -311,12 +297,7 @@ async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
         logger.warning(f"⚠️ Пользователь не найден для connection_id: {event.business_connection_id}")
         return
 
-    # ✅ ПРОВЕРКА ПОДПИСКИ
-    if not owner.has_active_subscription():
-        logger.info(f"⛔ Уведомление об удалении проигнорировано: у пользователя {owner.telegram_id} нет подписки")
-        return
-
-    # ✅ ПРОВЕРКА SAVEMODE
+    # ✅ ПРОВЕРКА SAVEMODE (без проверки подписки)
     if not owner.savemode_enabled:
         logger.info(f"ℹ️ SAVEMODE выключен для пользователя {owner.telegram_id}")
         return
@@ -361,13 +342,8 @@ async def handle_business_edited(message: Message):
     if not user:
         logger.warning(f"⚠️ Пользователь не найден для connection_id: {connection_id}")
         return
-    
-    # ✅ ПРОВЕРКА ПОДПИСКИ
-    if not user.has_active_subscription():
-        logger.info(f"⛔ Правка проигнорирована: у пользователя {user.telegram_id} нет подписки")
-        return
 
-    # ✅ ПРОВЕРКА SAVEMODE
+    # ✅ ПРОВЕРКА SAVEMODE (без проверки подписки)
     if not user.savemode_enabled:
         logger.info(f"ℹ️ SAVEMODE выключен для пользователя {user.telegram_id}")
         return
@@ -436,7 +412,6 @@ async def business_status(message: Message):
 📝 SAVE MODE: {'✅ Включен' if user.savemode_enabled else '❌ Выключен'}
 🔗 Подключений: {len(connections)}
 📊 Сохранено сообщений: {user.messages_saved}
-💳 Подписка: {'✅ Активна' if user.has_active_subscription() else '❌ Истекла'}
 """
     
     if connections:
@@ -449,35 +424,3 @@ async def business_status(message: Message):
                 status_text += "  Подключен: Неизвестно\n"
     
     await message.answer(status_text, parse_mode="HTML")
-
-
-@router.message(Command("savemode"))
-async def toggle_savemode(message: Message):
-    args = message.text.split()
-    
-    if len(args) < 2:
-        await message.answer("ℹ️ Использование: /savemode on - включить, /savemode off - выключить")
-        return
-    
-    action = args[1].lower()
-    
-    if action not in ["on", "off"]:
-        await message.answer("❌ Используйте 'on' или 'off'")
-        return
-    
-    enabled = action == "on"
-    
-    # ✅ ПРОВЕРКА ПОДПИСКИ ПРИ ВКЛЮЧЕНИИ
-    user = await UserRepository.get_by_id(message.from_user.id)
-    if enabled and not user.has_active_subscription():
-        await message.answer("⛔ <b>Ошибка</b>\n\nДля включения SAVE MODE требуется активная подписка.\n\n💰 Купить подписку: /buy\n📋 Подробнее: /subscribe", parse_mode="HTML")
-        return
-    
-    user = await UserRepository.update_settings(message.from_user.id, savemode_enabled=enabled)
-    
-    if not user:
-        await message.answer("❌ Ошибка: пользователь не найден")
-        return
-    
-    status = "включен" if enabled else "выключен"
-    await message.answer(f"✅ SAVE MODE {status} для вашего аккаунта")

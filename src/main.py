@@ -10,12 +10,12 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from src.config import settings
 from src.bot.middlewares.auth import AuthMiddleware
-from src.bot.middlewares.subscription import SubscriptionMiddleware
+# from src.bot.middlewares.subscription import SubscriptionMiddleware  # 👈 ЗАКОММЕНТИРОВАЛИ
 from src.bot.handlers import (
     start_router,
     profile_router,
     referral_router,
-    subscription_router,
+    # subscription_router,  # 👈 ЗАКОММЕНТИРОВАЛИ
     admin_router,
     save_mode_router,
     support_router,
@@ -48,11 +48,9 @@ async def media_cleanup_loop():
 async def main() -> None:
     """Основная функция запуска бота"""
     try:
-        # Инициализация БД
         await init_db()
         logger.info("✅ База данных инициализирована")
 
-        # Инициализация бота
         bot = Bot(
             token=settings.BOT_TOKEN,
             default=DefaultBotProperties(parse_mode=ParseMode.HTML)
@@ -60,18 +58,18 @@ async def main() -> None:
         storage = MemoryStorage()
         dp = Dispatcher(storage=storage)
 
-        # Подключаем мидлвари
+        # 👇 ТОЛЬКО АВТОРИЗАЦИЯ (без подписки)
         dp.message.middleware(AuthMiddleware(bot))
         dp.callback_query.middleware(AuthMiddleware(bot))
 
-        dp.message.middleware(SubscriptionMiddleware())
-        dp.callback_query.middleware(SubscriptionMiddleware())
+        # dp.message.middleware(SubscriptionMiddleware())  # 👈 ЗАКОММЕНТИРОВАЛИ
+        # dp.callback_query.middleware(SubscriptionMiddleware())
 
         # Подключаем роутеры
         dp.include_router(start_router)
         dp.include_router(profile_router)
         dp.include_router(referral_router)
-        dp.include_router(subscription_router)
+        # dp.include_router(subscription_router)  # 👈 ЗАКОММЕНТИРОВАЛИ
         dp.include_router(admin_router)
         dp.include_router(save_mode_router)
         dp.include_router(support_router)
@@ -80,7 +78,7 @@ async def main() -> None:
         logger.info(f"🚀 Бот запущен: @{settings.BOT_USERNAME}")
         logger.info(f"👤 Владелец: {settings.OWNER_TELEGRAM_ID}")
 
-        # Запускаем фоновые сервисы
+        # Фоновые сервисы
         asyncio.create_task(subscription_checker_loop(bot))
         logger.info("✅ Фоновый сервис проверки подписок запущен")
 
