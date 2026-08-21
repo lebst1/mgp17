@@ -1543,19 +1543,28 @@ async def show_users_list(target, page: int = 1, search_query: str = None):
     text = f"📋 <b>Список пользователей</b> (стр. {page}/{total_pages}, всего: {total_users})\n\n"
     keyboard_buttons = []
     
+    # Получаем все бизнес-подключения для проверки
+    async with async_session() as session:
+        business_connections = await session.scalars(
+            select(BusinessConnection).where(BusinessConnection.is_enabled == True)
+        )
+        business_users = {conn.user_id for conn in business_connections}
+    
     for user in users:
-        sub_status = "✅" if user.has_active_subscription() else "❌"
-        sub_until = user.subscription_until.strftime("%d.%m") if user.subscription_until else "—"
         name = user.first_name or user.username or str(user.telegram_id)
         if len(name) > 20:
             name = name[:17] + "..."
         status_icon = "🟢" if user.is_active else "🔴"
         msg_count = user.messages_saved or 0
         
+        # Проверяем, подключен ли бизнес-аккаунт
+        has_business = "🔗" if user.telegram_id in business_users else ""
+        savemode_status = "📝" if user.savemode_enabled else ""
+        
         user_line = f"{status_icon} <code>{user.telegram_id}</code>"
         if user.username:
             user_line += f" <b>@{user.username}</b>"
-        user_line += f" {name} | {sub_status} {sub_until} | 📊{msg_count}"
+        user_line += f" {name} | {has_business} {savemode_status} | 📊{msg_count}"
         text += user_line + "\n"
         
         keyboard_buttons.append([

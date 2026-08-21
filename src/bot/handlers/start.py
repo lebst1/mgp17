@@ -40,9 +40,6 @@ def _extract_referral_code(raw_deeplink: str) -> str | None:
 
 
 async def get_main_menu(user, has_business):
-    sub = user.get_subscription_info()
-    until = sub["subscription_until"].strftime("%d.%m.%Y") if sub["subscription_until"] else "—"
-
     referred_note = ""
     if user.referred_by:
         try:
@@ -63,7 +60,6 @@ async def get_main_menu(user, has_business):
 
 👤 <b>Профиль</b>
 ▸ Статус: <b>{'активен' if user.is_active else 'неактивен'}</b>
-▸ Подписка: <b>{sub['status']}</b> (до {until})
 ▸ SAVE MODE: <b>{'включен' if user.savemode_enabled else 'выключен'}</b>
 ▸ Business: <b>{'подключен' if has_business else 'не подключен'}</b>{referred_note}
 
@@ -72,8 +68,11 @@ async def get_main_menu(user, has_business):
 2. Открой Настройки Telegram → Редактирование профиля
 3. Выбери «Автоматизация чатов»
 4. Вставь скопированный юзернейм
-5. Дай разрешения на все сообщения!
-6. Нажми на кнопку "Добавить"
+5. Дай ВСЕ разрешения на сообщения
+6. Нажми «Добавить»
+
+⚠️ <b>Важно!</b> После подключения включи SAVE MODE через меню или командой:
+<code>/savemode on</code>
 
 <b>Что умеет бот:</b>
 • Присылает уведомления, когда собеседник удаляет сообщение
@@ -82,30 +81,29 @@ async def get_main_menu(user, has_business):
 """
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-    [
-        InlineKeyboardButton(text="👤 Профиль", callback_data="profile_menu"),
-        InlineKeyboardButton(text="🎁 Рефералы (бонус за регистрацию)", callback_data="referral_menu"),
-    ],
-    [
-        InlineKeyboardButton(text="💳 Подписка", callback_data="subscribe_menu"),
-        InlineKeyboardButton(text="📝 SAVE MODE", callback_data="savemode"),
-    ],
-    [
-        InlineKeyboardButton(
-            text="📋 Скопировать юзернейм",
-            copy_text=CopyTextButton(
-                text=f"@{settings.BOT_USERNAME.lstrip('@')}"
+        [
+            InlineKeyboardButton(text="👤 Профиль", callback_data="profile_menu"),
+            InlineKeyboardButton(text="🎁 Рефералы (бонус за регистрацию)", callback_data="referral_menu"),
+        ],
+        [
+            InlineKeyboardButton(text="📝 SAVE MODE", callback_data="savemode"),
+        ],
+        [
+            InlineKeyboardButton(
+                text="📋 Скопировать юзернейм",
+                copy_text=CopyTextButton(
+                    text=f"@{settings.BOT_USERNAME.lstrip('@')}"
+                )
             )
-        )
-    ],
-    [
-        InlineKeyboardButton(text="❓ Описание команд", callback_data="show_help"),
-        InlineKeyboardButton(text="⭐ Важное", callback_data="important"),
-    ],
-    [
-        InlineKeyboardButton(text="🆘 Поддержка", callback_data="support"),  # 👈 ДОБАВИТЬ
-    ],
-])
+        ],
+        [
+            InlineKeyboardButton(text="❓ Описание команд", callback_data="show_help"),
+            InlineKeyboardButton(text="⭐ Важное", callback_data="important"),
+        ],
+        [
+            InlineKeyboardButton(text="🆘 Поддержка", callback_data="support"),
+        ],
+    ])
 
     return text, keyboard
 

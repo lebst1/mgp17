@@ -19,12 +19,10 @@ def _format_date(dt) -> str:
 
 
 async def build_profile_text(user) -> str:
-    sub = user.get_subscription_info()
-    until = _format_date(sub["subscription_until"])
-
-    # Данные уже загружены через selectinload, безопасно используем
+    # Подсчет рефералов через связь direct_referrals
     referrals_count = len(user.direct_referrals) if user.direct_referrals else 0
     
+    # Подсчет заработанных дней через бонусы (только выпущенные)
     referral_days_earned = 0
     if user.bonuses_as_referrer:
         for bonus in user.bonuses_as_referrer:
@@ -37,11 +35,6 @@ async def build_profile_text(user) -> str:
 🆔 ID: <code>{user.telegram_id}</code>
 📛 Username: @{user.username or 'не указан'}
 📅 Дата регистрации: {_format_date(user.created_at)}
-
-💳 <b>Подписка</b>
-▸ Статус: {sub['status']}
-▸ Действует до: {until}
-▸ Осталось дней: {sub['days_left']}
 
 🎁 <b>Рефералы</b>
 ▸ Приглашено: {referrals_count}
@@ -61,7 +54,6 @@ async def profile_command(message: Message):
     user_id = message.from_user.id
     
     async with async_session() as session:
-        # Загружаем пользователя вместе с нужными связями
         result = await session.execute(
             select(User)
             .where(User.telegram_id == user_id)
@@ -73,14 +65,12 @@ async def profile_command(message: Message):
         user = result.scalar_one_or_none()
         
         if not user:
-            # Если пользователь не найден — создаем через репозиторий
             user, _ = await UserRepository.get_or_create(
                 telegram_id=user_id,
                 username=message.from_user.username,
                 first_name=message.from_user.first_name,
                 last_name=message.from_user.last_name,
             )
-            # Перезагружаем с нужными связями
             result = await session.execute(
                 select(User)
                 .where(User.telegram_id == user_id)
