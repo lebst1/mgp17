@@ -5,8 +5,6 @@ from src.db.session import async_session
 
 
 class MessageRepository:
-    """Репозиторий для работы с сообщениями"""
-    
     @staticmethod
     async def save_message(data: dict) -> SavedMessage:
         async with async_session() as session:

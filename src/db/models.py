@@ -289,22 +289,14 @@ class SavedMessage(Base):
 
     is_deleted = Column(Boolean, default=False, index=True)
     is_edited = Column(Boolean, default=False)
+    is_self_destruct = Column(Boolean, default=False)  # 👈 ДОБАВИТЬ ЭТО ПОЛЕ
+    ttl_seconds = Column(Integer, nullable=True)       # 👈 ДОБАВИТЬ ЭТО ПОЛЕ
     edit_history = Column(Text, nullable=True)
 
     saved_at = Column(DateTime, default=datetime.utcnow)
     original_date = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="saved_messages")
-
-    __table_args__ = (
-        Index("ix_saved_messages_user_id", "user_id"),
-        Index("ix_saved_messages_chat_id", "chat_id"),
-        Index("ix_saved_messages_is_deleted", "is_deleted"),
-        Index("ix_saved_messages_saved_at", "saved_at"),
-    )
-
-    def __repr__(self):
-        return f"<SavedMessage {self.id} from chat {self.chat_id}>"
 
 
 class Todo(Base):
