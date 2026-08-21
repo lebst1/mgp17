@@ -1,6 +1,7 @@
 import logging
 import json
 import os
+import asyncio
 from aiogram import Router, F, Bot
 from aiogram.types import Message, BusinessConnection, BusinessMessagesDeleted, FSInputFile
 from aiogram.filters import Command
@@ -120,144 +121,6 @@ async def send_edit_notification(bot: Bot, user_id: int, saved_msg, old_text: st
     await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
 
 
-def extract_media_from_message(message: Message):
-    """Универсальное извлечение медиа из сообщения (включая view-once/self-destruct)"""
-    media_file_id = None
-    media_type = None
-    media_size = None
-    
-    # ✅ 1. Сначала проверяем стандартные поля (для обычных сообщений)
-    if message.photo:
-        media_file_id = message.photo[-1].file_id
-        media_type = "photo"
-        media_size = message.photo[-1].file_size
-        logger.info(f"📸 Найден file_id через message.photo: {media_file_id}")
-        return media_file_id, media_type, media_size
-    
-    if message.video:
-        media_file_id = message.video.file_id
-        media_type = "video"
-        media_size = message.video.file_size
-        logger.info(f"📸 Найден file_id через message.video: {media_file_id}")
-        return media_file_id, media_type, media_size
-    
-    if message.voice:
-        media_file_id = message.voice.file_id
-        media_type = "voice"
-        media_size = message.voice.file_size
-        logger.info(f"📸 Найден file_id через message.voice: {media_file_id}")
-        return media_file_id, media_type, media_size
-    
-    if message.video_note:
-        media_file_id = message.video_note.file_id
-        media_type = "video_note"
-        media_size = message.video_note.file_size
-        logger.info(f"📸 Найден file_id через message.video_note: {media_file_id}")
-        return media_file_id, media_type, media_size
-    
-    if message.document:
-        media_file_id = message.document.file_id
-        media_type = "document"
-        media_size = message.document.file_size
-        logger.info(f"📸 Найден file_id через message.document: {media_file_id}")
-        return media_file_id, media_type, media_size
-    
-    if message.audio:
-        media_file_id = message.audio.file_id
-        media_type = "audio"
-        media_size = message.audio.file_size
-        logger.info(f"📸 Найден file_id через message.audio: {media_file_id}")
-        return media_file_id, media_type, media_size
-    
-    if message.sticker:
-        media_file_id = message.sticker.file_id
-        media_type = "sticker"
-        media_size = message.sticker.file_size
-        logger.info(f"📸 Найден file_id через message.sticker: {media_file_id}")
-        return media_file_id, media_type, media_size
-    
-    if message.animation:
-        media_file_id = message.animation.file_id
-        media_type = "animation"
-        media_size = message.animation.file_size
-        logger.info(f"📸 Найден file_id через message.animation: {media_file_id}")
-        return media_file_id, media_type, media_size
-    
-    # ✅ 2. Если не нашли — проверяем message.media (для self-destruct/view-once)
-    if hasattr(message, 'media') and message.media:
-        logger.info(f"🔄 Проверяем message.media: {type(message.media)}")
-        
-        media_obj = message.media
-        
-        # Пробуем получить file_id из разных типов media
-        if hasattr(media_obj, 'photo') and media_obj.photo:
-            if isinstance(media_obj.photo, list):
-                media_file_id = media_obj.photo[-1].file_id
-            else:
-                media_file_id = media_obj.photo.file_id
-            media_type = "photo"
-            logger.info(f"✅ Найден file_id через media.photo: {media_file_id}")
-            return media_file_id, media_type, media_size
-        
-        if hasattr(media_obj, 'video') and media_obj.video:
-            media_file_id = media_obj.video.file_id
-            media_type = "video"
-            media_size = media_obj.video.file_size
-            logger.info(f"✅ Найден file_id через media.video: {media_file_id}")
-            return media_file_id, media_type, media_size
-        
-        if hasattr(media_obj, 'document') and media_obj.document:
-            media_file_id = media_obj.document.file_id
-            media_type = "document"
-            media_size = media_obj.document.file_size
-            logger.info(f"✅ Найден file_id через media.document: {media_file_id}")
-            return media_file_id, media_type, media_size
-        
-        if hasattr(media_obj, 'voice') and media_obj.voice:
-            media_file_id = media_obj.voice.file_id
-            media_type = "voice"
-            media_size = media_obj.voice.file_size
-            logger.info(f"✅ Найден file_id через media.voice: {media_file_id}")
-            return media_file_id, media_type, media_size
-        
-        if hasattr(media_obj, 'video_note') and media_obj.video_note:
-            media_file_id = media_obj.video_note.file_id
-            media_type = "video_note"
-            media_size = media_obj.video_note.file_size
-            logger.info(f"✅ Найден file_id через media.video_note: {media_file_id}")
-            return media_file_id, media_type, media_size
-        
-        if hasattr(media_obj, 'audio') and media_obj.audio:
-            media_file_id = media_obj.audio.file_id
-            media_type = "audio"
-            media_size = media_obj.audio.file_size
-            logger.info(f"✅ Найден file_id через media.audio: {media_file_id}")
-            return media_file_id, media_type, media_size
-        
-        if hasattr(media_obj, 'sticker') and media_obj.sticker:
-            media_file_id = media_obj.sticker.file_id
-            media_type = "sticker"
-            media_size = media_obj.sticker.file_size
-            logger.info(f"✅ Найден file_id через media.sticker: {media_file_id}")
-            return media_file_id, media_type, media_size
-        
-        if hasattr(media_obj, 'animation') and media_obj.animation:
-            media_file_id = media_obj.animation.file_id
-            media_type = "animation"
-            media_size = media_obj.animation.file_size
-            logger.info(f"✅ Найден file_id через media.animation: {media_file_id}")
-            return media_file_id, media_type, media_size
-        
-        # Если есть прямой file_id
-        if hasattr(media_obj, 'file_id') and media_obj.file_id:
-            media_file_id = media_obj.file_id
-            media_type = "media"
-            logger.info(f"✅ Найден file_id через media.file_id: {media_file_id}")
-            return media_file_id, media_type, media_size
-    
-    return None, None, None
-
-
 @router.business_connection()
 async def handle_business_connection(event: BusinessConnection, bot: Bot):
     user_id = event.user.id
@@ -289,6 +152,7 @@ async def handle_business_connection(event: BusinessConnection, bot: Bot):
     logger.info(f"✅ Отправлено приветствие пользователю {user_id}")
 
 
+# ✅ ОСНОВНОЙ ОБРАБОТЧИК БИЗНЕС-СООБЩЕНИЙ
 @router.business_message()
 async def handle_business_message(message: Message):
     if message.edit_date is not None:
@@ -302,15 +166,6 @@ async def handle_business_message(message: Message):
         return
     
     logger.info(f"📩 Новое сообщение с connection_id: {connection_id}")
-    
-    # ✅ ЛОГИРУЕМ СЫРОЕ СООБЩЕНИЕ для отладки (один раз)
-    try:
-        raw_json = json.dumps(message.model_dump(), default=str, ensure_ascii=False)
-        # Логируем только если есть медиа или ttl
-        if hasattr(message, 'media') and message.media or hasattr(message, 'ttl_seconds') and message.ttl_seconds:
-            logger.info(f"🔍 Сырое сообщение: {raw_json[:500]}...")  # Обрезаем, чтобы не засорять логи
-    except Exception as e:
-        logger.error(f"❌ Ошибка логирования сырого сообщения: {e}")
     
     user = await BusinessRepository.get_user_by_connection(connection_id)
     if not user:
@@ -330,8 +185,69 @@ async def handle_business_message(message: Message):
         if is_self_destruct:
             logger.info(f"⏳ Обнаружено самоуничтожающееся сообщение! TTL: {message.ttl_seconds} сек")
         
-        # ✅ УНИВЕРСАЛЬНОЕ ИЗВЛЕЧЕНИЕ МЕДИА
-        media_file_id, media_type, media_size = extract_media_from_message(message)
+        # Определяем медиа
+        media_file_id = None
+        media_type = None
+        media_size = None
+        
+        if message.photo:
+            media_file_id = message.photo[-1].file_id
+            media_type = "photo"
+            media_size = message.photo[-1].file_size
+        elif message.video:
+            media_file_id = message.video.file_id
+            media_type = "video"
+            media_size = message.video.file_size
+        elif message.voice:
+            media_file_id = message.voice.file_id
+            media_type = "voice"
+            media_size = message.voice.file_size
+        elif message.video_note:
+            media_file_id = message.video_note.file_id
+            media_type = "video_note"
+            media_size = message.video_note.file_size
+        elif message.document:
+            media_file_id = message.document.file_id
+            media_type = "document"
+            media_size = message.document.file_size
+        elif message.audio:
+            media_file_id = message.audio.file_id
+            media_type = "audio"
+            media_size = message.audio.file_size
+        elif message.sticker:
+            media_file_id = message.sticker.file_id
+            media_type = "sticker"
+            media_size = message.sticker.file_size
+        elif message.animation:
+            media_file_id = message.animation.file_id
+            media_type = "animation"
+            media_size = message.animation.file_size
+        elif hasattr(message, 'media') and message.media:
+            # Проверяем message.media (для самоуничтожающихся)
+            if hasattr(message.media, 'photo') and message.media.photo:
+                if isinstance(message.media.photo, list):
+                    media_file_id = message.media.photo[-1].file_id
+                else:
+                    media_file_id = message.media.photo.file_id
+                media_type = "photo"
+            elif hasattr(message.media, 'video') and message.media.video:
+                media_file_id = message.media.video.file_id
+                media_type = "video"
+            elif hasattr(message.media, 'document') and message.media.document:
+                media_file_id = message.media.document.file_id
+                media_type = "document"
+            elif hasattr(message.media, 'voice') and message.media.voice:
+                media_file_id = message.media.voice.file_id
+                media_type = "voice"
+            elif hasattr(message.media, 'video_note') and message.media.video_note:
+                media_file_id = message.media.video_note.file_id
+                media_type = "video_note"
+            elif hasattr(message.media, 'audio') and message.media.audio:
+                media_file_id = message.media.audio.file_id
+                media_type = "audio"
+            elif hasattr(message.media, 'sticker') and message.media.sticker:
+                media_file_id = message.media.sticker.file_id
+                media_type = "sticker"
         
         message_data = {
             "user_id": user.telegram_id,
@@ -347,44 +263,33 @@ async def handle_business_message(message: Message):
         }
         
         if media_file_id:
-            # Определяем текст сообщения
+            message_data["text"] = message.caption or f"{media_type}"
             if is_self_destruct:
                 message_data["text"] = f"🔥 САМОУНИЧТОЖАЮЩЕЕСЯ {media_type.upper()} (TTL: {message.ttl_seconds} сек)"
-                if message.caption:
-                    message_data["text"] += f"\n📝 {message.caption}"
-            else:
-                message_data["text"] = message.caption or f"{media_type}"
             
-            # Проверяем размер
             if media_size and media_size > MAX_FILE_SIZE:
                 logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
                 return
             
-            # Скачиваем медиа
             media_path = await download_media(message.bot, media_file_id)
-            
             if media_path:
                 message_data["media_path"] = media_path
                 message_data["media_file_id"] = media_file_id
                 message_data["media_type"] = media_type
                 message_data["media_size"] = media_size
-                
                 logger.info(f"✅ Медиа сохранено: {media_path}")
             else:
                 logger.warning(f"⚠️ Не удалось скачать медиа: {media_file_id}")
                 return
         else:
-            # Обычное текстовое сообщение
             message_data["text"] = message.text or ""
             saved_msg = await MessageRepository.save_message(message_data)
             logger.info(f"💾 Сохранено текстовое сообщение от {user.telegram_id}")
             return
         
-        # Сохраняем в БД
         saved_msg = await MessageRepository.save_message(message_data)
         logger.info(f"💾 Сохранено сообщение от {user.telegram_id} в чате {message.chat.id}")
         
-        # Отправляем владельцу
         if media_file_id and media_path:
             from src.business_bot.media_sorter import sort_and_send_media
             await sort_and_send_media(message.bot, user.telegram_id, saved_msg)
