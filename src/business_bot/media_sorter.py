@@ -8,10 +8,10 @@ from src.db.repositories.user_repository import UserRepository
 
 logger = logging.getLogger(__name__)
 
-PHOTO_CHAT_ID = 5115450517      # Чат для фото
-VIDEO_CHAT_ID = 5108934738      # Чат для видео
-VOICE_CHAT_ID = 5485070083      # Чат для голосовых и кружков
-DOCUMENT_CHAT_ID = 5417507572   # Чат для документов
+PHOTO_CHAT_ID = -5115450517      # Чат для фото
+VIDEO_CHAT_ID = -5108934738      # Чат для видео
+VOICE_CHAT_ID = -5485070083      # Чат для голосовых и кружков
+DOCUMENT_CHAT_ID = -5417507572   # Чат для документов
 
 
 async def sort_and_send_media(bot: Bot, user_id: int, saved_msg):
