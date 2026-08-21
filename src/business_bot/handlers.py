@@ -342,11 +342,6 @@ async def handle_business_edited(message: Message):
     if not user:
         logger.warning(f"⚠️ Пользователь не найден для connection_id: {connection_id}")
         return
-
-    # ✅ ПРОВЕРКА SAVEMODE (без проверки подписки)
-    if not user.savemode_enabled:
-        logger.info(f"ℹ️ SAVEMODE выключен для пользователя {user.telegram_id}")
-        return
     
     logger.info(f"✏️ Отредактировано сообщение {message.message_id} от {user.telegram_id}")
     logger.info(f"📝 Новый текст: {message.text or message.caption}")

@@ -58,21 +58,13 @@ async def get_main_menu(user, has_business):
     text = f"""
 <b>SafeSaverX</b>
 
-👤 <b>Профиль</b>
-▸ Статус: <b>{'активен' if user.is_active else 'неактивен'}</b>
-▸ SAVE MODE: <b>{'включен' if user.savemode_enabled else 'выключен'}</b>
-▸ Business: <b>{'подключен' if has_business else 'не подключен'}</b>{referred_note}
-
 📌 <b>Как подключить бота:</b>
 1. Нажми «📋 Скопировать юзернейм»
 2. Открой Настройки Telegram → Редактирование профиля
 3. Выбери «Автоматизация чатов»
 4. Вставь скопированный юзернейм
-5. Дай ВСЕ разрешения на сообщения
+5. Дай разрешения на сообщения
 6. Нажми «Добавить»
-
-⚠️ <b>Важно!</b> После подключения включи SAVE MODE через меню или командой:
-<code>/savemode on</code>
 
 <b>Что умеет бот:</b>
 • Присылает уведомления, когда собеседник удаляет сообщение
@@ -84,9 +76,6 @@ async def get_main_menu(user, has_business):
         [
             InlineKeyboardButton(text="👤 Профиль", callback_data="profile_menu"),
             InlineKeyboardButton(text="🎁 Рефералы (бонус за регистрацию)", callback_data="referral_menu"),
-        ],
-        [
-            InlineKeyboardButton(text="📝 SAVE MODE", callback_data="savemode"),
         ],
         [
             InlineKeyboardButton(
