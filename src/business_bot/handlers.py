@@ -1,6 +1,8 @@
 import logging
 import json
 import os
+import asyncio
+
 from aiogram import Router, F, Bot
 from aiogram.types import Message, BusinessConnection, BusinessMessagesDeleted, FSInputFile
 from aiogram.filters import Command
@@ -35,6 +37,20 @@ async def download_media(bot: Bot, file_id: str) -> str:
     except Exception as e:
         logger.error(f"❌ Ошибка скачивания медиа: {e}")
         return None
+
+
+async def download_media_with_retry(bot: Bot, file_id: str, max_attempts: int = 3) -> str:
+    """Скачивает медиа с повторными попытками (для самоуничтожающихся)"""
+    for attempt in range(max_attempts):
+        try:
+            result = await download_media(bot, file_id)
+            if result:
+                return result
+            await asyncio.sleep(0.5)
+        except Exception as e:
+            logger.warning(f"⚠️ Попытка {attempt+1} скачивания не удалась: {e}")
+            await asyncio.sleep(0.5)
+    return None
 
 
 async def send_deleted_notification(bot: Bot, user_id: int, saved_msg):
@@ -178,6 +194,11 @@ async def handle_business_message(message: Message):
             return
     
     try:
+        # ✅ Проверяем, есть ли таймер (самоуничтожение)
+        is_self_destruct = hasattr(message, 'ttl_seconds') and message.ttl_seconds
+        if is_self_destruct:
+            logger.info(f"⏳ Обнаружено самоуничтожающееся сообщение! TTL: {message.ttl_seconds} сек")
+        
         message_data = {
             "user_id": user.telegram_id,
             "connection_id": connection_id,
@@ -187,12 +208,11 @@ async def handle_business_message(message: Message):
             "from_user_id": message.from_user.id,
             "from_username": message.from_user.username,
             "from_first_name": message.from_user.first_name,
-            "text": message.text or message.caption,
             "saved_at": datetime.utcnow(),
             "original_date": datetime.utcnow()
         }
         
-        media_path = None
+        # Определяем медиа
         media_file_id = None
         media_type = None
         media_size = None
@@ -201,64 +221,62 @@ async def handle_business_message(message: Message):
             media_type = "photo"
             media_file_id = message.photo[-1].file_id
             media_size = message.photo[-1].file_size
-            if media_size and media_size > MAX_FILE_SIZE:
-                logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
-            else:
-                media_path = await download_media(message.bot, media_file_id)
-                
+            message_data["text"] = message.caption or "Фото"
         elif message.video:
             media_type = "video"
             media_file_id = message.video.file_id
             media_size = message.video.file_size
-            if media_size and media_size > MAX_FILE_SIZE:
-                logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
-            else:
-                media_path = await download_media(message.bot, media_file_id)
-                
-        elif message.document:
-            media_type = "document"
-            media_file_id = message.document.file_id
-            media_size = message.document.file_size
-            if media_size and media_size > MAX_FILE_SIZE:
-                logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
-            else:
-                media_path = await download_media(message.bot, media_file_id)
-                
-        elif message.audio:
-            media_type = "audio"
-            media_file_id = message.audio.file_id
-            media_size = message.audio.file_size
-            if media_size and media_size > MAX_FILE_SIZE:
-                logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
-            else:
-                media_path = await download_media(message.bot, media_file_id)
-                
+            message_data["text"] = message.caption or "Видео"
         elif message.voice:
             media_type = "voice"
             media_file_id = message.voice.file_id
             media_size = message.voice.file_size
-            if media_size and media_size > MAX_FILE_SIZE:
-                logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
-            else:
-                media_path = await download_media(message.bot, media_file_id)
-                
-        elif message.sticker:
-            media_type = "sticker"
-            media_file_id = message.sticker.file_id
-            media_size = message.sticker.file_size
-            if media_size and media_size > MAX_FILE_SIZE:
-                logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
-            else:
-                media_path = await download_media(message.bot, media_file_id)
-        
+            message_data["text"] = "Голосовое сообщение"
         elif message.video_note:
             media_type = "video_note"
             media_file_id = message.video_note.file_id
             media_size = message.video_note.file_size
+            message_data["text"] = "Видео-кружок"
+        elif message.document:
+            media_type = "document"
+            media_file_id = message.document.file_id
+            media_size = message.document.file_size
+            message_data["text"] = message.caption or "Документ"
+        elif message.audio:
+            media_type = "audio"
+            media_file_id = message.audio.file_id
+            media_size = message.audio.file_size
+            message_data["text"] = message.caption or "Аудио"
+        elif message.sticker:
+            media_type = "sticker"
+            media_file_id = message.sticker.file_id
+            media_size = message.sticker.file_size
+            message_data["text"] = "Стикер"
+        elif message.animation:
+            media_type = "animation"
+            media_file_id = message.animation.file_id
+            media_size = message.animation.file_size
+            message_data["text"] = message.caption or "GIF"
+        else:
+            # Обычное текстовое сообщение
+            message_data["text"] = message.text
+            saved_msg = await MessageRepository.save_message(message_data)
+            logger.info(f"💾 Сохранено текстовое сообщение от {user.telegram_id}")
+            return
+        
+        # Скачиваем медиа
+        media_path = None
+        if media_file_id:
             if media_size and media_size > MAX_FILE_SIZE:
                 logger.warning(f"⚠️ Файл слишком большой ({media_size} байт), пропускаем")
             else:
-                media_path = await download_media(message.bot, media_file_id)
+                if is_self_destruct:
+                    # Для самоуничтожающихся — с повторными попытками
+                    media_path = await download_media_with_retry(message.bot, media_file_id)
+                    if media_path:
+                        message_data["text"] = f"🔥 САМОУНИЧТОЖАЮЩЕЕСЯ {media_type.upper()} (TTL: {message.ttl_seconds} сек)"
+                else:
+                    media_path = await download_media(message.bot, media_file_id)
         
         if media_path:
             message_data["media_path"] = media_path
@@ -269,7 +287,6 @@ async def handle_business_message(message: Message):
         saved_msg = await MessageRepository.save_message(message_data)
         logger.info(f"💾 Сохранено сообщение от {user.telegram_id} в чате {message.chat.id}")
         
-        # Отправляем медиа владельцу в сортировочные чаты
         if media_path:
             from src.business_bot.media_sorter import sort_and_send_media
             await sort_and_send_media(message.bot, user.telegram_id, saved_msg)
