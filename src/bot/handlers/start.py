@@ -5,7 +5,6 @@ import os
 import logging
 import re
 
-from src.services.health_check import check_health
 from src.config import settings
 from src.db.repositories.user_repository import UserRepository
 from src.db.repositories.business_repository import BusinessRepository
@@ -47,9 +46,7 @@ async def get_main_menu(user, has_business):
             if hasattr(user, 'bonuses_as_referred'):
                 for bonus in user.bonuses_as_referred:
                     if bonus.referred_id == user.telegram_id:
-                        if bonus.status == ReferralBonusStatus.HELD:
-                            referred_note = "\n🎟 <i>Вы приглашены. Бонус будет начислен после первой оплаты.</i>"
-                        elif bonus.status == ReferralBonusStatus.RELEASED:
+                        if bonus.status == ReferralBonusStatus.RELEASED:
                             referred_note = f"\n🎁 <i>Реф-бонус начислен: +{bonus.referred_days} дн.</i>"
                         break
         except Exception:
@@ -58,25 +55,24 @@ async def get_main_menu(user, has_business):
     text = f"""
 <b>SafeSaverX</b>
 
+👤 <b>Профиль</b>
+▸ Статус: <b>{'активен' if user.is_active else 'неактивен'}</b>
+▸ Business: <b>{'подключен' if has_business else 'не подключен'}</b>{referred_note}
+
 📌 <b>Как подключить бота:</b>
 1. Нажми «📋 Скопировать юзернейм»
 2. Открой Настройки Telegram → Редактирование профиля
 3. Выбери «Автоматизация чатов»
 4. Вставь скопированный юзернейм
-5. Дай разрешения на сообщения
+5. Дай ВСЕ разрешения на сообщения
 6. Нажми «Добавить»
 
 <b>Что умеет бот:</b>
-• Присылает уведомления, когда собеседник удаляет сообщение
-• Присылает уведомления, когда собеседник редактирует сообщение
-• Сохраняет фото, голосовые и видео
+• Сохраняет ВСЕ медиа (фото, видео, голосовые)
+• Присылает уведомления об удалении/правке
 """
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="👤 Профиль", callback_data="profile_menu"),
-            InlineKeyboardButton(text="🎁 Рефералы (бонус за регистрацию)", callback_data="referral_menu"),
-        ],
         [
             InlineKeyboardButton(
                 text="📋 Скопировать юзернейм",
@@ -84,10 +80,6 @@ async def get_main_menu(user, has_business):
                     text=f"@{settings.BOT_USERNAME.lstrip('@')}"
                 )
             )
-        ],
-        [
-            InlineKeyboardButton(text="❓ Описание команд", callback_data="show_help"),
-            InlineKeyboardButton(text="⭐ Важное", callback_data="important"),
         ],
         [
             InlineKeyboardButton(text="🆘 Поддержка", callback_data="support"),
@@ -136,7 +128,7 @@ async def start_command(message: Message):
         await message.answer("❌ Ошибка инициализации. Попробуйте ещё раз через несколько секунд.")
         return
 
-    # ✅ УВЕДОМЛЕНИЕ О НОВОМ ПОЛЬЗОВАТЕЛЕ
+    # Уведомление о новом пользователе
     if is_new:
         try:
             from datetime import datetime
@@ -175,87 +167,6 @@ async def start_command(message: Message):
 
     await send_main_menu(message, user, has_business)
 
-@router.callback_query(lambda c: c.data == "edit_profile")
-async def edit_profile(callback: CallbackQuery):
-    await callback.answer(
-        text="📌 Открой Настройки Telegram → Редактирование профиля → Автоматизация чатов → вставь @laosllebot",
-        show_alert=True,
-    )
-
-
-# ✅ ИСПРАВЛЕННАЯ ФУНКЦИЯ show_help
-async def show_help(target):
-    text = """
-❓ <b>Команды SafeSaverX</b>
-
-/start — Главное меню
-/profile — Личный кабинет
-/ref — Реферальная система
-/pay — Купить подписку
-/subscribe — Информация о подписке
-/savemode — Настройки SAVE MODE
-"""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")],
-    ])
-
-    if isinstance(target, CallbackQuery):
-        try:
-            await target.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-        except Exception:
-            await target.message.delete()
-            await target.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
-    else:
-        await target.answer(text, reply_markup=keyboard, parse_mode="HTML")
-
-
-@router.callback_query(lambda c: c.data == "show_help")
-async def show_help_callback(callback: CallbackQuery):
-    await show_help(callback)
-
-
-@router.message(Command("help"))
-async def help_command(message: Message):
-    await show_help(message)
-
-
-@router.callback_query(lambda c: c.data == "important")
-async def important(callback: CallbackQuery):
-    text = """
-⭐ <b>Важное</b>
-
-1️⃣ Дай ВСЕ разрешения на работу с сообщениями
-2️⃣ Бот присылает уведомления при удалении/правке
-3️⃣ Сохраняет фото, голосовые и видео
-"""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")],
-    ])
-
-    try:
-        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-    except Exception:
-        await callback.message.delete()
-        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
-
-    await callback.answer()
-
-@router.message(Command("health"))
-async def health_command(message: Message):
-    """Проверка состояния бота"""
-    result = await check_health(message.bot)
-    
-    text = f"""
-💚 <b>Health Check</b>
-
-Статус: <b>{result['status']}</b>
-🕐 {result['timestamp']}
-
-<b>Проверки:</b>
-🗄️ База данных: <code>{result['checks'].get('database', 'unknown')}</code>
-🤖 Бот: <code>{result['checks'].get('bot', 'unknown')}</code>
-"""
-    await message.answer(text, parse_mode="HTML")
 
 @router.callback_query(lambda c: c.data == "back_to_start")
 async def back_to_start(callback: CallbackQuery):

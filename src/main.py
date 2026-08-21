@@ -14,17 +14,17 @@ from src.bot.middlewares.auth import AuthMiddleware
 # from src.bot.middlewares.subscription import SubscriptionMiddleware  # 👈 ЗАКОММЕНТИРОВАЛИ
 from src.bot.handlers import (
     start_router,
-    profile_router,
-    referral_router,
-    # subscription_router,  # 👈 ЗАКОММЕНТИРОВАЛИ
+    # profile_router,      # 👈 УБРАТЬ
+    # referral_router,      # 👈 УБРАТЬ
+    # subscription_router,  # 👈 УБРАТЬ (уже закомментирован)
     admin_router,
-    save_mode_router,
+    # save_mode_router,     # 👈 УБРАТЬ (уже не нужен)
     support_router,
 )
+
 from src.business_bot.handlers import router as business_router
 from src.db.session import init_db
 from src.utils.sentry import SentryStub
-from src.services.subscription_checker import subscription_checker_loop
 from src.services.backup import backup_loop, cleanup_media_if_needed
 
 # Настройка логирования
@@ -68,11 +68,8 @@ async def main() -> None:
 
         # Подключаем роутеры
         dp.include_router(start_router)
-        dp.include_router(profile_router)
-        dp.include_router(referral_router)
         # dp.include_router(subscription_router)  # 👈 ЗАКОММЕНТИРОВАЛИ
         dp.include_router(admin_router)
-        dp.include_router(save_mode_router)
         dp.include_router(support_router)
         dp.include_router(business_router)
         dp.include_router(save_self_destruct_router)
@@ -81,9 +78,6 @@ async def main() -> None:
         logger.info(f"👤 Владелец: {settings.OWNER_TELEGRAM_ID}")
 
         # Фоновые сервисы
-        asyncio.create_task(subscription_checker_loop(bot))
-        logger.info("✅ Фоновый сервис проверки подписок запущен")
-
         asyncio.create_task(backup_loop())
         logger.info("✅ Фоновый сервис бэкапов запущен")
 
