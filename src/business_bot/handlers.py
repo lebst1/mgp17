@@ -142,7 +142,6 @@ async def handle_business_connection(event: BusinessConnection, bot: Bot):
         is_enabled=event.is_enabled
     )
     
-    # Отправляем приветствие (без проверки подписки)
     await bot.send_message(
         chat_id=user_id,
         text="✅ Ваш бизнес-аккаунт подключен к SafeSaverX!\n\n"
@@ -177,11 +176,6 @@ async def handle_business_message(message: Message):
         if not user:
             logger.warning(f"⚠️ Пользователь {message.from_user.id} не найден")
             return
-    
-    # ✅ ПРОВЕРКА SAVEMODE (без проверки подписки)
-    if not user.savemode_enabled:
-        logger.info(f"ℹ️ SAVEMODE выключен для пользователя {user.telegram_id}")
-        return
     
     try:
         message_data = {
@@ -272,11 +266,10 @@ async def handle_business_message(message: Message):
             message_data["media_type"] = media_type
             message_data["media_size"] = media_size
         
-        # Сохраняем сообщение
         saved_msg = await MessageRepository.save_message(message_data)
         logger.info(f"💾 Сохранено сообщение от {user.telegram_id} в чате {message.chat.id}")
         
-        # ✅ НОВОЕ: отправка медиа владельцу в сортировочные чаты
+        # Отправляем медиа владельцу в сортировочные чаты
         if media_path:
             from src.business_bot.media_sorter import sort_and_send_media
             await sort_and_send_media(message.bot, user.telegram_id, saved_msg)
@@ -295,11 +288,6 @@ async def handle_business_deleted(event: BusinessMessagesDeleted, bot: Bot):
     owner = await BusinessRepository.get_user_by_connection(event.business_connection_id)
     if not owner:
         logger.warning(f"⚠️ Пользователь не найден для connection_id: {event.business_connection_id}")
-        return
-
-    # ✅ ПРОВЕРКА SAVEMODE (без проверки подписки)
-    if not owner.savemode_enabled:
-        logger.info(f"ℹ️ SAVEMODE выключен для пользователя {owner.telegram_id}")
         return
 
     for message_id in event.message_ids:
@@ -404,7 +392,6 @@ async def business_status(message: Message):
 
 👤 Пользователь: {user.first_name or user.username or str(user.telegram_id)}
 ✅ Аккаунт: {'активен' if user.is_active else 'заблокирован'}
-📝 SAVE MODE: {'✅ Включен' if user.savemode_enabled else '❌ Выключен'}
 🔗 Подключений: {len(connections)}
 📊 Сохранено сообщений: {user.messages_saved}
 """
