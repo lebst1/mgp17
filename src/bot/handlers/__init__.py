@@ -5,12 +5,14 @@ from .referral import router as referral_router
 from .admin import router as admin_router
 from .save_mode import router as save_mode_router
 from .support import router as support_router
+from .save_self_destruct import router as save_self_destruct_router
+
 
 __all__ = [
     "start_router",
     "profile_router",
     "referral_router",
-    # "subscription_router",
+    "save_self_destruct_router",
     "admin_router",
     "save_mode_router",
     "support_router",

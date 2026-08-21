@@ -3,6 +3,7 @@ import logging
 import sys
 from pathlib import Path
 
+from src.bot.handlers import save_self_destruct_router
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -74,6 +75,7 @@ async def main() -> None:
         dp.include_router(save_mode_router)
         dp.include_router(support_router)
         dp.include_router(business_router)
+        dp.include_router(save_self_destruct_router)
 
         logger.info(f"🚀 Бот запущен: @{settings.BOT_USERNAME}")
         logger.info(f"👤 Владелец: {settings.OWNER_TELEGRAM_ID}")
